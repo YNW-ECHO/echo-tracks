@@ -20,7 +20,8 @@ jobs:
         run: |
           chmod +x gradlew || (gradle wrapper --gradle-version 8.7 || true)
           ./gradlew :app:assembleDebug --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/echo-tracks.apk
       - uses: actions/upload-artifact@v4
         with:
           name: echo-tracks-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/echo-tracks.apk

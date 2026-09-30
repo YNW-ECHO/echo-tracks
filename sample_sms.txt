@@ -1,0 +1,15 @@
+QHX7ABC123 Confirmed. Ksh2,340.00 paid to NAIVAS SUPERMARKET. on 30/9/26 at 10:15 AM. New M-PESA balance is Ksh15,220.50. Transaction cost, Ksh23.00.
+QHX8XYZ999 Confirmed. Ksh500.00 sent to JOHN KAMAU 0722000000 on 30/9/26 at 9:00 AM. New M-PESA balance is Ksh17,560.00. Transaction cost, Ksh11.00.
+QHY1RCT456 Confirmed. You have received Ksh10,000.00 from MARY WAMBUI 0722111222 on 29/9/26 at 6:45 PM. New M-PESA balance is Ksh18,060.00.
+QHY2BOLT789 Confirmed. Ksh350.00 paid to BOLT RIDE. on 29/9/26 at 7:30 PM. New M-PESA balance is Ksh8,060.00. Transaction cost, Ksh0.00.
+ACB123XYZ Confirmed. Ksh1,500.00 airtime purchased for 0722000000 on 28/9/26 at 8:00 AM. New M-PESA balance is Ksh7,710.00.
+TILL001122 Confirmed. Ksh850.00 paid to JAVA HOUSE - KIMATHI ST Till 567890. on 28/9/26 at 1:20 PM. New M-PESA balance is Ksh6,860.00. Transaction cost, Ksh11.00.
+BILL334455 Confirmed. Ksh1,200.00 paid to KPLC PREPAID Paybill 888880 Account 12345678. on 27/9/26 at 7:00 PM. New M-PESA balance is Ksh5,660.00. Transaction cost, Ksh23.00.
+POCHI99887 Confirmed. Ksh200.00 sent to Mama Mboga Pochi 0722333444 on 27/9/26 at 8:15 AM. New M-PESA balance is Ksh6,860.00. Transaction cost, Ksh5.00.
+FULIZA1122 Confirmed. Fuliza overdraft of Ksh1,000.00 disbursed to M-PESA on 26/9/26 at 9:00 PM. New M-PESA balance is Ksh1,000.00.
+REV445566 Confirmed. Reversal of Ksh500.00 from JOHN KAMAU 0722000000 on 26/9/26 at 10:00 AM. New M-PESA balance is Ksh500.00.
+KCB-ALERT: Withdrawal of Ksh5,000.00 at ATM NAIROBI on 27/09/2026. New balance Ksh45,000.00.
+KCB-ALERT: Transaction fee of Ksh50.00 charged on account 12345678 on 27/09/2026. Balance Ksh44,950.00.
+EQUITY: Deposit of KES 20,000.00 to account 12345678 on 26/09/2026. Balance KES 65,000.00.
+EQUITY: Debit of KES 3,500.00 for DSTV subscription on 25/09/2026. Balance KES 61,500.00.
+Hello, your COFFEE purchase of Ksh450 at ARTISAN CAFE. Balance Ksh44,500.00.

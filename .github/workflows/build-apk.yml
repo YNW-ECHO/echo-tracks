@@ -1,0 +1,26 @@
+name: Build Echo Tracks APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Accept licenses
+        run: yes | sdkmanager --licenses || true
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew || (gradle wrapper --gradle-version 8.7 || true)
+          ./gradlew :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: echo-tracks-apk
+          path: app/build/outputs/apk/debug/app-debug.apk

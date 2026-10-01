@@ -13,8 +13,48 @@ object EchoStats {
     }
     fun search(txs: List<EchoTransaction>, q: String): List<EchoTransaction> {
         if (q.isBlank()) return txs
-        val s = q.lowercase()
+        val s = q.trim().lowercase()
+        // Amount search: "5000" exact/contains, ">5000", ">=5000", "<1000", "<=1000",
+        // "1000-5000" range, "5k" shorthand. Combines with text match via OR.
+        parseAmountFilter(s)?.let { pred ->
+            val textHit = txs.filter {
+                it.who.lowercase().contains(s) || it.category.name.lowercase().contains(s)
+            }
+            return (txs.filter { pred(it.amount) } + textHit).distinctBy { it.code }
+        }
         return txs.filter { it.who.lowercase().contains(s) || it.category.name.lowercase().contains(s) }
+    }
+
+    private fun parseNum(tok: String): Double? {
+        val t = tok.trim().lowercase().replace(",", "")
+        if (t.isBlank()) return null
+        return when {
+            t.endsWith("k") -> t.dropLast(1).toDoubleOrNull()?.times(1000)
+            t.endsWith("m") -> t.dropLast(1).toDoubleOrNull()?.times(1_000_000)
+            else -> t.toDoubleOrNull()
+        }
+    }
+
+    private fun parseAmountFilter(s: String): ((Double) -> Boolean)? {
+        val t = s.replace("ksh", "").replace("kes", "").replace("/-", "").trim()
+        if (t.isBlank()) return null
+        // range: "1000-5000" / "1k-5k"
+        if (Regex("""^[\d.,km]+\s*-\s*[\d.,km]+$""").matches(t)) {
+            val parts = t.split("-")
+            val lo = parseNum(parts[0]) ?: return null
+            val hi = parseNum(parts[1]) ?: return null
+            val (a, b) = if (lo <= hi) lo to hi else hi to lo
+            return { amt -> amt in a..b }
+        }
+        // comparators
+        if (t.startsWith(">=")) { val n = parseNum(t.drop(2)) ?: return null; return { it >= n } }
+        if (t.startsWith("<=")) { val n = parseNum(t.drop(2)) ?: return null; return { it <= n } }
+        if (t.startsWith(">")) { val n = parseNum(t.drop(1)) ?: return null; return { it > n } }
+        if (t.startsWith("<")) { val n = parseNum(t.drop(1)) ?: return null; return { it < n } }
+        // plain number: exact match OR digit-substring (typing "500" finds 500, 1500, 5000)
+        val n = parseNum(t) ?: return null
+        if (n <= 0) return null
+        return { amt -> amt == n || amt.toLong().toString().contains(n.toLong().toString()) }
     }
     fun totals(txs: List<EchoTransaction>): Pair<Double, Double> {
         val spent = txs.filter { it.direction == Direction.OUT }.sumOf { it.amount }

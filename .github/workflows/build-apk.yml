@@ -70,8 +70,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.${{ github.run_number }}
-          name: Echo Tracks v1.2.${{ github.run_number }}
+          tag_name: v1.3.${{ github.run_number }}
+          name: Echo Tracks v1.3.${{ github.run_number }}
           body: |
             Echo Tracks auto-build from main.
             Open the app to get the update notice, or download echo-tracks.apk below and install (data + PIN stay).

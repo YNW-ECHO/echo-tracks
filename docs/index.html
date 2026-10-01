@@ -6,12 +6,19 @@
 <title>Echo Tracks — Download</title>
 <style>
 body{font-family:system-ui;margin:0;background:#0E1A2B;color:#F2F7F5;text-align:center;padding:40px 16px}
-.card{max-width:520px;margin:auto;background:#16263D;border-radius:16px;padding:28px}
+.card{max-width:560px;margin:auto;background:#16263D;border-radius:16px;padding:28px}
 .logo{font-size:44px;color:#00E5A0;font-weight:800}
 .btn{display:inline-block;margin-top:18px;background:#00E5A0;color:#0E1A2B;font-weight:700;
 padding:14px 26px;border-radius:12px;text-decoration:none;font-size:18px}
 .small{opacity:.75;font-size:14px;margin-top:14px;line-height:1.6}
 code{background:#0E1A2B;padding:2px 8px;border-radius:8px}
+.shots{display:flex;gap:12px;justify-content:center;margin-top:22px;flex-wrap:wrap}
+.shot{width:150px;background:#0E1A2B;border-radius:14px;padding:12px 10px;text-align:left;font-size:12px;line-height:1.5;border:1px solid #1E3252}
+.shot b{color:#00E5A0;display:block;margin-bottom:6px;font-size:13px}
+.shot .big{font-size:18px;font-weight:800;color:#FFB020;font-style:italic}
+.shot .row{display:flex;justify-content:space-between;margin-top:6px}
+.privacy{max-width:560px;margin:18px auto 0;background:#0E1A2B;border-radius:14px;padding:18px;font-size:13px;line-height:1.7;text-align:left;opacity:.92}
+.privacy b{color:#00E5A0}
 </style>
 </head>
 <body>
@@ -24,6 +31,18 @@ Enter this page URL on your phone, tap Download, then Install.<br>
 Allow <code>Install unknown apps</code> once. Data + PIN stay on updates.<br>
 Requires Android 8+ • SMS permission for auto-tracking.
 </div>
+<div class="shots">
+<div class="shot"><b>◉ Home</b><div class="big">Spent 12,400</div><div class="row"><span>Naivas ›</span><span>2,300</span></div><div class="row"><span>Bolt ›</span><span>850</span></div><div class="row"><span style="opacity:.6">“Save 23%”</span></div></div>
+<div class="shot"><b>☰ Echoes</b><div class="big" style="color:#00E5A0">Jan 12 — 4,100</div><div class="row"><span>KPLC • bills</span><span>−1,500</span></div><div class="row"><span>Java • food</span><span>−650</span></div><div class="row"><span style="opacity:.6">tap any for details</span></div></div>
+<div class="shot"><b>◈ Stats</b><div class="big">◍ 42% food</div><div class="row"><span>● shopping ›</span><span>5,200</span></div><div class="row"><span>● fare ›</span><span>3,100</span></div><div class="row"><span style="opacity:.6">caps turn red</span></div></div>
+</div>
+<p class="small">Screenshots above are live mockups — inside the app you can now take real screenshots (we removed the block).</p>
+</div>
+<div class="privacy">
+<b>🔒 100% offline — why does install mention permissions?</b><br>
+Android shows a standard warning because Echo Tracks asks for <code>READ_SMS</code> (to auto-read M-PESA/bank SMS) + <code>POST_NOTIFICATIONS</code> (bill + update alerts) + <code>INTERNET</code> (only to check GitHub Releases for updates).<br><br>
+<b>Your data never leaves the phone:</b> SMS are parsed on-device, stored in a local Room database, PIN in encrypted prefs. No account, no analytics, no server, no ads. You can even turn off internet after install — tracking keeps working, only the update check pauses.<br>
+Source: <code>SmsReader.kt</code> → <code>EchoDb</code> (local) — nothing is uploaded anywhere.
 </div>
 </body>
 </html>

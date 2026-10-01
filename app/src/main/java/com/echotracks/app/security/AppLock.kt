@@ -27,6 +27,13 @@ object AppLock {
     fun setPin(ctx: Context, pin: String) { prefs(ctx).edit().putString(KEY_PIN, pin).apply() }
     fun hasPin(ctx: Context) = prefs(ctx).getString(KEY_PIN, null) != null
     fun checkPin(ctx: Context, pin: String) = prefs(ctx).getString(KEY_PIN, null) == pin
+    fun clearPin(ctx: Context) {
+        try { prefs(ctx).edit().remove(KEY_PIN).apply() } catch (_: Exception) { }
+        // also clear plain fallback copy (devices without keystore)
+        try {
+            ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().remove(KEY_PIN).apply()
+        } catch (_: Exception) { }
+    }
     fun canUseBiometric(ctx: Context): Boolean {
         val m = BiometricManager.from(ctx)
         return m.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==

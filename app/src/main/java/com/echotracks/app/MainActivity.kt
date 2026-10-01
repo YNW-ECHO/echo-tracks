@@ -28,6 +28,7 @@ import com.echotracks.app.data.BudgetStore
 import com.echotracks.app.data.EchoStats
 import com.echotracks.app.data.Exporter
 import com.echotracks.app.data.SmsReader
+import com.echotracks.app.data.UpdateChecker
 import com.echotracks.app.model.*
 import com.echotracks.app.security.AppLock
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +71,7 @@ fun EchoApp() {
     var unlocked by remember { mutableStateOf(!AppLock.hasPin(ctx)) }
     var pinInput by remember { mutableStateOf("") }
     var pinSetup by remember { mutableStateOf("") }
+    var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
 
@@ -93,6 +95,34 @@ fun EchoApp() {
                 withContext(Dispatchers.Main) { txs = tx; loading = false }
             }
         }
+    }
+    // In-app updater: check GitHub Releases/latest once per launch (offline-safe)
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val info = UpdateChecker.check(ctx)
+            if (info != null) {
+                withContext(Dispatchers.Main) { update = info }
+                UpdateChecker.notify(ctx, info)
+            }
+        }
+    }
+    // Update dialog (shown above lock gate so you never miss it)
+    update?.let { info ->
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Echo Tracks ${info.tag} available") },
+            text = { Text("A new version is on GitHub. Tap Download to update, then install the APK (your data + PIN stay).") },
+            confirmButton = {
+                TextButton(onClick = {
+                    UpdateChecker.openUpdate(ctx, info.url)
+                }) { Text("Download") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    UpdateChecker.dismiss(ctx, info.tag); update = null
+                }) { Text("Later") }
+            }
+        )
     }
 
     if (!unlocked) {

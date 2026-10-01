@@ -4,6 +4,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -61,3 +64,17 @@ jobs:
         with:
           name: echo-tracks-apk
           path: app/build/outputs/apk/debug/echo-tracks.apk
+
+      # Publish GitHub Release so the in-app updater (UpdateChecker)
+      # sees releases/latest and notifies the phone.
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.${{ github.run_number }}
+          name: Echo Tracks v1.1.${{ github.run_number }}
+          body: |
+            Echo Tracks auto-build from main.
+            Open the app to get the update notice, or download echo-tracks.apk below and install (data + PIN stay).
+          files: app/build/outputs/apk/debug/echo-tracks.apk
+          draft: false
+          prerelease: false

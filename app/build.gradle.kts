@@ -12,8 +12,8 @@ android {
         applicationId = "com.echotracks.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -58,4 +58,6 @@ dependencies {
     // security + strength (stable versions - alphas break CI resolution)
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // background daily rescan
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 }

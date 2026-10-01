@@ -7,8 +7,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
+import androidx.activity.result.contract.ActivityResultContractsimport androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,10 +22,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.navigation.compose.*
 import com.echotracks.app.data.BudgetStore
+import com.echotracks.app.data.CategoryBudgets
+import com.echotracks.app.data.EchoDb
+import com.echotracks.app.data.EchoEntity
 import com.echotracks.app.data.EchoStats
 import com.echotracks.app.data.Exporter
+import com.echotracks.app.data.RescanWorker
 import com.echotracks.app.data.SmsReader
 import com.echotracks.app.data.UpdateChecker
 import com.echotracks.app.model.*
@@ -39,7 +43,7 @@ val Mint = Color(0xFF00E5A0); val Midnight = Color(0xFF0E1A2B)
 val CardBg = Color(0xFF16263D); val Ink = Color(0xFFF2F7F5)
 val Rose = Color(0xFFFF8A80); val Amber = Color(0xFFFFB020)
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(
@@ -91,11 +95,44 @@ fun EchoApp() {
         if (granted && txs.isEmpty() && !loading) {
             loading = true
             scope.launch(Dispatchers.IO) {
-                val tx = SmsReader.toTransactions(SmsReader.readAll(ctx))
-                withContext(Dispatchers.Main) { txs = tx; loading = false }
+                // 1) instant: Room cache (works offline, fast with 8k SMS)
+                try {
+                    val cached = EchoDb.get(ctx).dao().all()
+                    if (cached.isNotEmpty()) {
+                        val mapped = cached.map {
+                            EchoTransaction(
+                                it.code, it.amount, it.who, it.date,
+                                try { Source.valueOf(it.source) } catch (_: Exception) { Source.MPESA },
+                                try { Direction.valueOf(it.direction) } catch (_: Exception) { Direction.OUT },
+                                try { Category.valueOf(it.category) } catch (_: Exception) { Category.UNCATEGORIZED },
+                                try { SpendType.valueOf(it.spendType) } catch (_: Exception) { SpendType.REAL_SPEND },
+                                null, it.raw
+                            )
+                        }.sortedByDescending { it.dateMillis }
+                        withContext(Dispatchers.Main) { txs = mapped }
+                    }
+                } catch (_: Exception) {}
+                // 2) fresh: inbox rescan + cache new
+                try {
+                    val tx = SmsReader.toTransactions(SmsReader.readAll(ctx))
+                    try {
+                        EchoDb.get(ctx).dao().insertAll(tx.map {
+                            EchoEntity(
+                                it.code, it.amount, it.who, it.dateMillis,
+                                it.source.name, it.direction.name,
+                                it.category.name, it.spendType.name, it.rawSms.take(500)
+                            )
+                        })
+                    } catch (_: Exception) {}
+                    withContext(Dispatchers.Main) { txs = tx; loading = false }
+                } catch (_: Exception) {
+                    withContext(Dispatchers.Main) { loading = false }
+                }
             }
         }
     }
+    // Daily background rescan (once per install)
+    LaunchedEffect(Unit) { RescanWorker.schedule(ctx) }
     // In-app updater: check GitHub Releases/latest once per launch (offline-safe)
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -126,6 +163,7 @@ fun EchoApp() {
     }
 
     if (!unlocked) {
+        val act = ctx as? androidx.fragment.app.FragmentActivity
         LockGate(
             pinInput = pinInput, onInput = { pinInput = it },
             onUnlock = {
@@ -136,6 +174,11 @@ fun EchoApp() {
             onSavePin = {
                 if (pinSetup.length >= 4) { AppLock.setPin(ctx, pinSetup); unlocked = true }
                 else Toast.makeText(ctx, "PIN must be 4+ digits", Toast.LENGTH_SHORT).show()
+            },
+            canBio = act != null && AppLock.canUseBiometric(ctx),
+            onBio = {
+                if (act != null) AppLock.promptBiometric(act) { unlocked = true }
+                else Toast.makeText(ctx, "No fingerprint on this device", Toast.LENGTH_SHORT).show()
             }
         )
         return
@@ -216,7 +259,8 @@ fun hasSms(ctx: android.content.Context) =
 // ---------- LOCK ----------
 @Composable
 fun LockGate(pinInput: String, onInput: (String) -> Unit, onUnlock: () -> Unit,
-             setupMode: Boolean, setup: String, onSetup: (String) -> Unit, onSavePin: () -> Unit) {
+             setupMode: Boolean, setup: String, onSetup: (String) -> Unit, onSavePin: () -> Unit,
+             canBio: Boolean = false, onBio: () -> Unit = {}) {
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally) {
         Text("◉ Echo Tracks", color = Mint, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -228,11 +272,15 @@ fun LockGate(pinInput: String, onInput: (String) -> Unit, onUnlock: () -> Unit,
             Spacer(Modifier.height(12.dp))
             Button(onClick = onSavePin, colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight)) { Text("Save & Enter") }
         } else {
-            Text("Enter PIN (fingerprint coming on device with biometrics)")
+            Text("Enter PIN or use fingerprint")
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(value = pinInput, onValueChange = onInput, label = { Text("PIN") })
             Spacer(Modifier.height(12.dp))
             Button(onClick = onUnlock, colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight)) { Text("Unlock") }
+            if (canBio) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onBio) { Text("Use fingerprint", color = Mint) }
+            }
         }
     }
 }
@@ -273,8 +321,12 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                         val (thisM, lastM) = EchoStats.thisMonthVsLast(txs)
                         val delta = if (lastM > 0) (((thisM - lastM) / lastM * 100).toInt()) else 0
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AssistChip(onClick = {}, label = { Text("Saved $rate%") })
-                            AssistChip(onClick = {}, label = {
+                            AssistChip(onClick = {
+                                Toast.makeText(ctx2, "Saved $rate% of income this view", Toast.LENGTH_SHORT).show()
+                            }, label = { Text("Saved $rate%") })
+                            AssistChip(onClick = {
+                                Toast.makeText(ctx2, "This month ${"%,.0f".format(thisM)} vs last ${"%,.0f".format(lastM)}", Toast.LENGTH_LONG).show()
+                            }, label = {
                                 Text(if (delta <= 0) "↓ ${-delta}% vs last month" else "↑ $delta% vs last month")
                             })
                         }
@@ -462,6 +514,7 @@ fun StatsDash(txs: List<EchoTransaction>) {
     val byCat = remember(txs) { EchoStats.byCategory(txs) }
     val total = (byCat.sumOf { it.second }).coerceAtLeast(1.0)
     val palette = listOf(Mint, Amber, Rose, Color(0xFF7C9AFF), Color(0xFF9D7BFF), Color(0xFF5BD8C8))
+    val ctx = LocalContext.current
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
@@ -484,6 +537,66 @@ fun StatsDash(txs: List<EchoTransaction>) {
                         }
                     }
                     if (byCat.isEmpty()) Text("No data in this view.")
+                }
+            }
+        }
+        item {
+            CategoryCapsCard(txs = txs)
+        }
+    }
+}
+
+@Composable
+fun CategoryCapsCard(txs: List<EchoTransaction>) {
+    val ctx = LocalContext.current
+    val spentByCat = remember(txs) { EchoStats.byCategory(txs).toMap() }
+    var refresh by remember { mutableStateOf(0) }
+    Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Category caps", color = Amber, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text("Tap a cap, type a monthly limit, Save. Over-cap turns red.",
+                style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(8.dp))
+            // refresh marker to re-read prefs after save
+            refresh.let {
+                Category.values().filter { it != Category.UNCATEGORIZED }.forEach { c ->
+                    val spent = spentByCat[c] ?: 0.0
+                    var txt by remember(c, it) {
+                        mutableStateOf(
+                            CategoryBudgets.get(ctx, c).takeIf { it > 0 }?.toInt()?.toString() ?: ""
+                        )
+                    }
+                    val cap = txt.toDoubleOrNull() ?: 0.0
+                    val over = cap > 0 && spent > cap
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(c.name.lowercase(), fontWeight = FontWeight.SemiBold,
+                                color = if (over) Rose else Ink)
+                            Text("spent ${"%,.0f".format(spent)}" +
+                                if (cap > 0) " / cap ${"%,.0f".format(cap)}" else " / no cap",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (over) Rose else Ink.copy(alpha = 0.7f))
+                        }
+                        OutlinedTextField(
+                            value = txt,
+                            onValueChange = { txt = it.filter { ch -> ch.isDigit() }.take(9) },
+                            label = { Text("Cap") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(onClick = {
+                            CategoryBudgets.set(ctx, c, txt.toDoubleOrNull() ?: 0.0)
+                            refresh++
+                            Toast.makeText(ctx, "${c.name.lowercase()} cap saved", Toast.LENGTH_SHORT).show()
+                        }, colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight)) {
+                            Text("Save")
+                        }
+                    }
                 }
             }
         }

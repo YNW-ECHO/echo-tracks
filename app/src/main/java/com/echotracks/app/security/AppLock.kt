@@ -2,6 +2,9 @@ package com.echotracks.app.security
 
 import android.content.Context
 import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -28,6 +31,29 @@ object AppLock {
         val m = BiometricManager.from(ctx)
         return m.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
             BiometricManager.BIOMETRIC_SUCCESS
+    }
+
+    /** Fingerprint/face unlock. No-op on devices without biometrics. */
+    fun promptBiometric(activity: FragmentActivity, onSuccess: () -> Unit) {
+        try {
+            if (!canUseBiometric(activity)) return
+            val exec = ContextCompat.getMainExecutor(activity)
+            val prompt = BiometricPrompt(
+                activity, exec,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(r: BiometricPrompt.AuthenticationResult) {
+                        onSuccess()
+                    }
+                }
+            )
+            prompt.authenticate(
+                BiometricPrompt.PromptInfo.Builder()
+                    .setTitle("Echo Tracks")
+                    .setSubtitle("Unlock with fingerprint")
+                    .setNegativeButtonText("Use PIN")
+                    .build()
+            )
+        } catch (_: Exception) {}
     }
     fun markBackground(ctx: Context) { prefs(ctx).edit().putLong(KEY_TIMEOUT, System.currentTimeMillis()).apply() }
     fun needsLock(ctx: Context, timeoutMin: Int = 2): Boolean {

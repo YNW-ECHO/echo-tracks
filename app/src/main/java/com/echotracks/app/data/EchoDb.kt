@@ -1,5 +1,6 @@
 package com.echotracks.app.data
 
+import android.content.Context
 import androidx.room.*
 
 @Entity(tableName = "echo_tx")
@@ -19,4 +20,15 @@ data class EchoEntity(
 }
 
 @Database(entities = [EchoEntity::class], version = 1, exportSchema = false)
-abstract class EchoDb : RoomDatabase() { abstract fun dao(): EchoDao }
+abstract class EchoDb : RoomDatabase() {
+    abstract fun dao(): EchoDao
+
+    companion object {
+        @Volatile private var I: EchoDb? = null
+        fun get(ctx: Context): EchoDb = I ?: synchronized(this) {
+            I ?: Room.databaseBuilder(
+                ctx.applicationContext, EchoDb::class.java, "echo.db"
+            ).fallbackToDestructiveMigration().build().also { I = it }
+        }
+    }
+}

@@ -645,7 +645,6 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {}) {
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var goalTxt by remember { mutableStateOf(BudgetStore.get(ctx).toInt().toString()) }
-    var editing by remember { mutableStateOf(false) }
     var savedFlash by remember { mutableStateOf(false) }
     val goal = goalTxt.toDoubleOrNull()?.coerceAtLeast(1.0) ?: 1.0
     val pct = (monthSpend / goal).coerceIn(0.0, 1.0)
@@ -723,36 +722,30 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {}) {
                 }
             }
             Spacer(Modifier.height(8.dp))
-            if (!editing) {
-                OutlinedButton(
+            // Always-visible input + Save: type any amount, tap Save, done.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = goalTxt,
+                    onValueChange = { goalTxt = it.filter { c -> c.isDigit() }.take(9) },
+                    label = { Text("Goal (Ksh)") }, modifier = Modifier.weight(1f), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                Button(
                     onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        editing = true
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("✏️ Custom amount", color = Mint) }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = goalTxt,
-                        onValueChange = { goalTxt = it.filter { c -> c.isDigit() }.take(9) },
-                        label = { Text("Goal (Ksh)") }, modifier = Modifier.weight(1f), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
-                    Button(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            val g = goalTxt.toDoubleOrNull() ?: 30000.0
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val g = goalTxt.toDoubleOrNull()
+                        if (g == null || g < 1000) {
+                            Toast.makeText(ctx, "Type an amount first (min 1,000)", Toast.LENGTH_SHORT).show()
+                        } else {
                             BudgetStore.set(ctx, g)
-                            editing = false
                             savedFlash = true
                             onSaved(g)
                             OverspendAlerter.check(ctx, monthSpend, g)
                             Toast.makeText(ctx, "Budget goal saved: ${"%,.0f".format(g)}", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight)
-                    ) { Text("Save") }
-                }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight)
+                ) { Text("Save") }
             }
         }
     }

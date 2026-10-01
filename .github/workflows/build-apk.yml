@@ -7,20 +7,56 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
-      - name: Accept licenses
-        run: yes | sdkmanager --licenses || true
+
+      # NOTE: android-actions/setup-android@v3 is deprecated and calls
+      # `sdkmanager "tools"` which no longer exists ->
+      # "Failed to find package 'tools'" + exit code 1.
+      # Install cmdline-tools "latest" manually instead.
+      - name: Set up Android SDK (cmdline-tools latest)
+        run: |
+          set -e
+          SDK=$ANDROID_SDK_ROOT
+          sudo mkdir -p $SDK/cmdline-tools
+          sudo rm -rf $SDK/cmdline-tools/latest
+          cd /tmp
+          rm -rf /tmp/cmdline-tools
+          curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          sudo unzip -q -o commandlinetools-linux-11076708_latest.zip -d $SDK/cmdline-tools
+          sudo mv $SDK/cmdline-tools/cmdline-tools $SDK/cmdline-tools/latest
+          sudo chown -R $USER:$USER $SDK/cmdline-tools/latest || true
+          export PATH=$SDK/cmdline-tools/latest/bin:$PATH
+          echo "$SDK/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$SDK/platform-tools" >> $GITHUB_PATH
+          sdkmanager --version
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Accept licenses (again, belt and braces)
+        run: yes | sdkmanager --licenses > /dev/null || true
+
+      - name: Set up Gradle 8.7 (no wrapper needed)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
       - name: Build debug APK
         run: |
-          chmod +x gradlew || (gradle wrapper --gradle-version 8.7 || true)
-          ./gradlew :app:assembleDebug --stacktrace
+          set -e
+          gradle :app:assembleDebug --stacktrace
+          ls -lh app/build/outputs/apk/debug/
           cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/echo-tracks.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: echo-tracks-apk

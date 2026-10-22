@@ -123,6 +123,14 @@ object UpdateChecker {
         return File(dir, "echo-tracks-update.apk")
     }
 
+    /** The already-downloaded update APK, if a valid one is staged. */
+    fun stagedApk(ctx: Context): File? {
+        return try {
+            val f = apkFile(ctx)
+            if (f.exists() && f.length() > 100_000L) f else null
+        } catch (_: Exception) { null }
+    }
+
     /**
      * Download the release APK straight into the app. onProgress(0..100).
      * Returns the staged file, or null if anything went wrong.

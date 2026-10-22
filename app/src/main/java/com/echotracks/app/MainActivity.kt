@@ -406,6 +406,20 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                 if (dl == null) {
                     TextButton(onClick = {
                         updateErr = null
+                        val staged = UpdateChecker.stagedApk(ctx)
+                        if (staged != null) {
+                            // already downloaded (e.g. user is granting "install unknown apps")
+                            val started = UpdateChecker.install(ctx, staged)
+                            if (started) {
+                                UpdateChecker.dismiss(ctx, info.tag)
+                                update = null
+                                Toast.makeText(ctx, "Installer opened — tap Install to finish.",
+                                    Toast.LENGTH_LONG).show()
+                            } else {
+                                updateErr = "Allow “install unknown apps” for Echo Tracks, then tap Update again."
+                            }
+                            return@TextButton
+                        }
                         updateProgress = 0
                         scope.launch {
                             val file = UpdateChecker.download(ctx, info.url) { p ->

@@ -70,25 +70,98 @@ object EchoStats {
             .mapValues { (_, v) -> v.sumOf { it.amount } }.toList().sortedByDescending { it.second }.take(n)
 
     // best dashboard fuel: per-day totals for last N days (oldest->newest for charts)
-    fun perDay(txs: List<EchoTransaction>, days: Int = 14): List<Pair<String, Double>> {
+    data class DayBar(val label: String, val amount: Double, val dayStart: Long)
+    fun perDay(txs: List<EchoTransaction>, days: Int = 14, direction: Direction = Direction.OUT): List<DayBar> {
         val cal = Calendar.getInstance()
         val fmt = java.text.SimpleDateFormat("EEE", Locale.US)
-        val map = LinkedHashMap<String, Double>()
-        val keys = mutableListOf<String>(); val dayKeys = mutableListOf<String>()
+        data class K(val y: Int, val d: Int)
+        val keys = mutableListOf<K>()
+        val labels = mutableListOf<String>()
+        val starts = mutableListOf<Long>()
+        val map = LinkedHashMap<K, Double>()
+        val now = System.currentTimeMillis()
         for (i in days - 1 downTo 0) {
-            cal.timeInMillis = System.currentTimeMillis()
+            cal.timeInMillis = now
             cal.add(Calendar.DAY_OF_YEAR, -i)
-            val key = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.DAY_OF_YEAR)}"
-            dayKeys.add(key); keys.add(fmt.format(cal.time))
-            map[key] = 0.0
+            val k = K(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR))
+            keys.add(k); labels.add(fmt.format(cal.time))
+            starts.add(startOfDay(cal.timeInMillis)); map[k] = 0.0
         }
         for (t in txs) {
-            if (t.direction != Direction.OUT) continue
+            if (t.direction != direction) continue
             cal.timeInMillis = t.dateMillis
-            val key = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.DAY_OF_YEAR)}"
-            if (map.containsKey(key)) map[key] = map[key]!! + t.amount
+            val k = K(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR))
+            if (map.containsKey(k)) map[k] = map[k]!! + t.amount
         }
-        return keys.zip(dayKeys.map { map[it] ?: 0.0 })
+        return keys.mapIndexed { idx, k -> DayBar(labels[idx], map[k] ?: 0.0, starts[idx]) }
+    }
+
+    // 12-month history fuel: per-month totals (oldest->newest for charts)
+    data class MonthBar(val label: String, val amount: Double, val monthStart: Long)
+    fun perMonth(txs: List<EchoTransaction>, months: Int = 12, direction: Direction = Direction.OUT): List<MonthBar> {
+        val cal = Calendar.getInstance()
+        val fmt = java.text.SimpleDateFormat("MMM", Locale.US)
+        data class K(val y: Int, val m: Int)
+        val keys = mutableListOf<K>()
+        val labels = mutableListOf<String>()
+        val starts = mutableListOf<Long>()
+        val map = LinkedHashMap<K, Double>()
+        val now = System.currentTimeMillis()
+        for (i in months - 1 downTo 0) {
+            cal.timeInMillis = now
+            cal.add(Calendar.MONTH, -i)
+            cal.set(Calendar.DAY_OF_MONTH, 1)
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            val k = K(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH))
+            keys.add(k); labels.add(fmt.format(cal.time))
+            starts.add(cal.timeInMillis); map[k] = 0.0
+        }
+        for (t in txs) {
+            if (t.direction != direction) continue
+            cal.timeInMillis = t.dateMillis
+            val k = K(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH))
+            if (map.containsKey(k)) map[k] = map[k]!! + t.amount
+        }
+        return keys.mapIndexed { idx, k -> MonthBar(labels[idx], map[k] ?: 0.0, starts[idx]) }
+    }
+
+    // bounds for the month `offset` back (0 = this month): start .. end inclusive
+    fun monthRange(offset: Int): Pair<Long, Long> {
+        val c = Calendar.getInstance()
+        c.add(Calendar.MONTH, -offset)
+        c.set(Calendar.DAY_OF_MONTH, 1)
+        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0)
+        c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+        val from = c.timeInMillis
+        c.add(Calendar.MONTH, 1)
+        return from to (c.timeInMillis - 1)
+    }
+    // bounds for an arbitrary month containing `monthStart` (from perMonth MonthBar).
+    // Used by month drill-in: tap a bar in the 12-month chart -> filter to that month.
+    fun monthBounds(monthStart: Long): Pair<Long, Long> {
+        return try {
+            val c = Calendar.getInstance()
+            c.timeInMillis = monthStart
+            c.set(Calendar.DAY_OF_MONTH, 1)
+            c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0)
+            c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+            val from = c.timeInMillis
+            c.add(Calendar.MONTH, 1)
+            from to (c.timeInMillis - 1)
+        } catch (_: Exception) {
+            monthStart to (monthStart + 31L * 24 * 60 * 60 * 1000 - 1)
+        }
+    }
+    fun byCategoryMonth(txs: List<EchoTransaction>, offset: Int): List<Pair<Category, Double>> {
+        val (from, to) = monthRange(offset)
+        return byCategory(inRange(txs, from, to))
+    }
+    fun daysLeftInMonth(): Int {
+        return try {
+            val c = Calendar.getInstance()
+            c.getActualMaximum(Calendar.DAY_OF_MONTH) - c.get(Calendar.DAY_OF_MONTH) + 1
+        } catch (_: Exception) { 0 }
     }
 
     fun dailyStory(txs: List<EchoTransaction>): String {
@@ -140,6 +213,24 @@ object EchoStats {
         c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
         return c.timeInMillis
     }
+    // year history: distinct calendar years present in data (newest first)
+    fun yearsOf(txs: List<EchoTransaction>): List<Int> {
+        return try {
+            val c = Calendar.getInstance()
+            txs.map {
+                c.timeInMillis = it.dateMillis
+                c.get(Calendar.YEAR)
+            }.distinct().sortedDescending()
+        } catch (_: Exception) { emptyList() }
+    }
+    // bounds for one history year: Jan 1 00:00:00.000 .. Dec 31 23:59:59.999
+    fun yearBounds(year: Int): Pair<Long, Long> {
+        val c = Calendar.getInstance()
+        c.set(year, Calendar.JANUARY, 1, 0, 0, 0); c.set(Calendar.MILLISECOND, 0)
+        val from = c.timeInMillis
+        c.set(year, Calendar.DECEMBER, 31, 23, 59, 59); c.set(Calendar.MILLISECOND, 999)
+        return from to c.timeInMillis
+    }
     // budget-goal bar: spend this calendar month (clean, OUT only)
     fun monthSpent(txs: List<EchoTransaction>): Double {
         val c = Calendar.getInstance()
@@ -148,24 +239,41 @@ object EchoStats {
         val start = c.timeInMillis
         return txs.filter { it.dateMillis >= start && it.direction == Direction.OUT }.sumOf { it.amount }
     }
-    data class BillDue(val name: String, val avgAmount: Double, val daysLeft: Int, val overdue: Boolean)
-    // bill reminders: recurring BILLS payees (2+ payments) -> next due ≈ last + 30d
-    fun upcomingBills(txs: List<EchoTransaction>): List<BillDue> {
-        val bills = txs.filter { it.direction == Direction.OUT && it.category == Category.BILLS }
-        if (bills.isEmpty()) return emptyList()
+    data class BillDue(val name: String, val avgAmount: Double, val daysLeft: Int, val overdue: Boolean,
+                      val key: String = "", val userMarked: Boolean = false)
+    // bill reminders: recurring BILLS/RENT payees (2+ payments) -> next due ≈ last + 30d.
+    // paid overrides (BillStore: user tapped "Paid") win as the new baseline.
+    fun upcomingBills(txs: List<EchoTransaction>, paid: Map<String, Long> = emptyMap()): List<BillDue> {
+        val bills = txs.filter {
+            it.direction == Direction.OUT && (it.category == Category.BILLS || it.category == Category.RENT)
+        }
+        if (bills.isEmpty() && paid.isEmpty()) return emptyList()
         val now = System.currentTimeMillis()
-        return bills.groupBy { it.who }.mapNotNull { (who, list) ->
+        val fromTx = bills.groupBy { it.who }.mapNotNull { (who, list) ->
             if (list.size < 1) return@mapNotNull null
             val sorted = list.sortedBy { it.dateMillis }
             val last = sorted.last().dateMillis
             val avg = list.sumOf { it.amount } / list.size
             // repeat bill if seen 2+ times OR looks like utility (kplc/dstv/water/rent)
             val l = who.lowercase()
-            val isUtility = listOf("kplc","dstv","gotv","water","rent","nhif").any { it in l }
+            val isUtility = listOf("kplc", "dstv", "gotv", "water", "rent", "nhif").any { it in l }
             if (list.size < 2 && !isUtility) return@mapNotNull null
-            val nextDue = last + 30L * 24 * 60 * 60 * 1000
+            who to Triple(who, avg, last)
+        }.toMap()
+        val keys = (fromTx.keys.map { it.trim().lowercase() } + paid.keys).distinct()
+        return keys.mapNotNull { key ->
+            val entry = fromTx.entries.firstOrNull { it.key.trim().lowercase() == key }
+            val who = entry?.key ?: key
+            val avg = entry?.value?.second ?: 0.0
+            val lastTx = entry?.value?.third ?: 0L
+            val marked = paid[key]
+            if (entry == null && marked == null) return@mapNotNull null
+            // user-confirmed payment is the freshest baseline
+            val base = maxOf(lastTx, marked ?: 0L)
+            if (base <= 0) return@mapNotNull null
+            val nextDue = base + 30L * 24 * 60 * 60 * 1000
             val daysLeft = ((nextDue - now) / (24 * 60 * 60 * 1000)).toInt()
-            BillDue(who.take(30), avg, daysLeft, daysLeft < 0)
-        }.sortedBy { it.daysLeft }.take(5)
+            BillDue(who.take(30), avg, daysLeft, daysLeft < 0, key, marked != null)
+        }.sortedBy { it.daysLeft }.take(6)
     }
 }

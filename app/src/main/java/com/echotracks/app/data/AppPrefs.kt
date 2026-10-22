@@ -53,4 +53,25 @@ object AppPrefs {
     fun setLockTimeout(ctx: Context, v: Int) = try {
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putInt("lock_timeout", v).apply()
     } catch (_: Exception) { Unit }
+
+    // Recent searches: last few queries, newest first (max 6), offline.
+    fun recentQueries(ctx: Context): List<String> = try {
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getString("recent_q", "")!!.split("||")
+            .map { it.trim() }.filter { it.isNotEmpty() }.take(6)
+    } catch (_: Exception) { emptyList() }
+
+    fun addRecentQuery(ctx: Context, q: String) {
+        try {
+            val clean = q.trim().take(40)
+            if (clean.length < 2) return
+            val cur = recentQueries(ctx).filter { !it.equals(clean, ignoreCase = true) }
+            val next = (listOf(clean) + cur).take(6).joinToString("||")
+            ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString("recent_q", next).apply()
+        } catch (_: Exception) { Unit }
+    }
+
+    fun clearRecentQueries(ctx: Context) = try {
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().remove("recent_q").apply()
+    } catch (_: Exception) { Unit }
 }

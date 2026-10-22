@@ -9,8 +9,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +21,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,8 +37,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.navigation.compose.*
+import com.echotracks.app.data.BillStore
 import com.echotracks.app.data.BudgetStore
 import com.echotracks.app.data.CategoryBudgets
 import com.echotracks.app.data.EchoDb
@@ -56,6 +68,7 @@ import com.echotracks.app.data.UpdateChecker
 import com.echotracks.app.model.*
 import com.echotracks.app.security.AppLock
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -63,6 +76,74 @@ val Mint = Color(0xFF00E5A0); val DeepMint = Color(0xFF00B87E); val Midnight = C
 val CardBg = Color(0xFF16263D); val CardHi = Color(0xFF1E3252); val Ink = Color(0xFFF2F7F5)
 val Rose = Color(0xFFFF8A80); val Amber = Color(0xFFFFB020); val Sky = Color(0xFF7C9AFF)
 val HeroBrush = Brush.horizontalGradient(listOf(Color(0xFF123B2F), Color(0xFF16263D)))
+
+// ---------- THEME-AWARE SURFACES (light mode actually works) ----------
+// Hardcoded dark colors broke light theme. These resolve per current mode.
+val LocalEchoDark = compositionLocalOf { true }
+
+@Composable fun echoCard(): Color = if (LocalEchoDark.current) CardBg else Color.White
+@Composable fun echoCardHi(): Color = if (LocalEchoDark.current) CardHi else Color(0xFFE9F0EB)
+@Composable fun echoDeep(): Color = if (LocalEchoDark.current) Midnight else Color(0xFFD9E5DD)
+@Composable fun echoInk(): Color = if (LocalEchoDark.current) Ink else Color(0xFF0E1A2B)
+@Composable fun heroBrush(): Brush = if (LocalEchoDark.current) HeroBrush
+else Brush.horizontalGradient(listOf(Color(0xFFDFF5EA), Color.White))
+@Composable fun goalBrush(): Brush = if (LocalEchoDark.current)
+    Brush.verticalGradient(listOf(CardBg, Color(0xFF101F36)))
+else Brush.verticalGradient(listOf(Color.White, Color(0xFFDFF0E5)))
+@Composable fun dayBrush(): Brush = if (LocalEchoDark.current)
+    Brush.horizontalGradient(listOf(CardHi, Color(0xFF0F2B26)))
+else Brush.horizontalGradient(listOf(Color(0xFFE9F0EB), Color(0xFFD6EBDD)))
+
+// Single shared display-title style (was copy-pasted serif-italic ~15 times).
+@Composable fun echoTitleStyle(base: TextStyle = MaterialTheme.typography.titleMedium): TextStyle =
+    base.copy(fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, fontWeight = FontWeight.Bold)
+
+@Composable fun EchoH(text: String, color: Color = Mint, style: TextStyle = MaterialTheme.typography.titleMedium) {
+    Text(text, color = color, style = echoTitleStyle(style))
+}
+
+// Haptic tap helper shared by every screen (was local to DashboardHome only).
+@Composable fun rememberTap(): (() -> Unit) -> Unit {
+    val haptic = LocalHapticFeedback.current
+    return { fn ->
+        try { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) } catch (_: Exception) { }
+        fn()
+    }
+}
+
+// Tappable search hints + recent searches. Used by Home + Echoes.
+@Composable fun SearchSuggestRow(
+    onPick: (String) -> Unit,
+    recents: List<String> = emptyList(),
+    onClearRecents: () -> Unit = {}
+) {
+    val tap = rememberTap()
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf("kplc", "naivas", ">5000", "<1000", "1k-5k", "1000-5000").forEach { s ->
+                AssistChip(onClick = { tap { onPick(s) } }, label = { Text(s) })
+            }
+        }
+        if (recents.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Recent:", style = MaterialTheme.typography.labelSmall, color = echoInk().copy(alpha = 0.6f))
+                recents.forEach { r ->
+                    AssistChip(onClick = { tap { onPick(r) } }, label = { Text(r) })
+                }
+                TextButton(onClick = onClearRecents) {
+                    Text("Clear", color = Rose, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -115,13 +196,15 @@ fun ThemedEchoApp() {
         labelMedium = base.labelMedium.copy(fontFamily = ff, fontSize = base.labelMedium.fontSize * fontScale),
     )
     MaterialTheme(colorScheme = scheme, typography = scaled) {
-        EchoApp(
-            onPrefsChanged = {
-                themeMode = AppPrefs.theme(ctx)
-                fontKey = AppPrefs.font(ctx)
-                fontScale = AppPrefs.fontScale(ctx)
-            }
-        )
+        CompositionLocalProvider(LocalEchoDark provides dark) {
+            EchoApp(
+                onPrefsChanged = {
+                    themeMode = AppPrefs.theme(ctx)
+                    fontKey = AppPrefs.font(ctx)
+                    fontScale = AppPrefs.fontScale(ctx)
+                }
+            )
+        }
     }
 }
 
@@ -135,11 +218,17 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
     var hideNoise by remember { mutableStateOf(true) }
     var rangeKey by remember { mutableStateOf("ALL") } // ALL/1M/3M/6M
     var sourceTab by remember { mutableStateOf("ALL") }
+    var yearKey by remember { mutableStateOf("ALL") } // ALL or "2026"/"2025"… from data
     var query by remember { mutableStateOf("") }
+    var dayKey by remember { mutableStateOf<Long?>(null) } // drill-in to one day (from chart tap)
+    var monthKey by remember { mutableStateOf<Long?>(null) } // drill-in to one month (from 12-mo chart tap)
+    var recents by remember { mutableStateOf(AppPrefs.recentQueries(ctx)) }
     var unlocked by remember { mutableStateOf(!AppLock.hasPin(ctx)) }
     var pinInput by remember { mutableStateOf("") }
     var pinSetup by remember { mutableStateOf("") }
     var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
+    var updateProgress by remember { mutableStateOf<Int?>(null) } // null = idle, else 0..100
+    var updateErr by remember { mutableStateOf<String?>(null) }
     var selectedTx by remember { mutableStateOf<EchoTransaction?>(null) }
     var infoTitle by remember { mutableStateOf<String?>(null) }
     var infoBody by remember { mutableStateOf("") }
@@ -156,6 +245,14 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
         } catch (_: Exception) { list }
     }
 
+    // remember meaningful searches (debounced) for tappable recent chips
+    LaunchedEffect(query) {
+        if (query.isBlank()) return@LaunchedEffect
+        delay(900)
+        AppPrefs.addRecentQuery(ctx, query)
+        recents = AppPrefs.recentQueries(ctx)
+    }
+
     suspend fun loadAndCache(): List<EchoTransaction> {
         val raw = SmsReader.toTransactions(SmsReader.readAll(ctx))
         val tx = applyLearned(raw)
@@ -169,6 +266,41 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
             })
         } catch (_: Exception) {}
         return tx
+    }
+
+    fun rescan() {
+        loading = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val tx = loadAndCache()
+                withContext(Dispatchers.Main) {
+                    txs = tx; loading = false
+                    Toast.makeText(ctx, "${tx.size} echoes refreshed", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    loading = false
+                    Toast.makeText(ctx, "Rescan failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Android 13+ needs POST_NOTIFICATIONS at runtime, otherwise update +
+    // overspend alerts are silently dropped.
+    val notifLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { ok ->
+        if (!ok) Toast.makeText(ctx, "Alerts off — enable notifications in Settings", Toast.LENGTH_SHORT).show()
+    }
+    LaunchedEffect(granted) {
+        if (!granted) return@LaunchedEffect
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val have = ContextCompat.checkSelfPermission(
+                ctx, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!have) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -243,20 +375,69 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
     }
     // Update dialog (shown above lock gate so you never miss it)
     update?.let { info ->
+        val dl = updateProgress
         AlertDialog(
-            onDismissRequest = { },
+            onDismissRequest = {
+                if (dl == null) { UpdateChecker.dismiss(ctx, info.tag); update = null }
+            },
             title = { Text("Echo Tracks ${info.tag} available") },
-            text = { Text("A new version is on GitHub. Tap Download to update, then install the APK (your data + PIN stay).") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("A new version is live. Update right here in the app — no APK to fetch by hand.")
+                    if (dl != null) {
+                        LinearProgressIndicator(
+                            progress = { dl / 100f },
+                            color = Mint,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("Downloading… $dl%", style = MaterialTheme.typography.bodySmall, color = Mint)
+                    }
+                    updateErr?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = Rose)
+                    }
+                    Text("Your data, PIN, budget and settings stay exactly as they are.",
+                        style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { UpdateChecker.openUpdate(ctx, info.url) }) {
+                        Text("Get it from GitHub instead", color = Sky)
+                    }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    UpdateChecker.openUpdate(ctx, info.url)
-                    UpdateChecker.dismiss(ctx, info.tag); update = null
-                }) { Text("Download") }
+                if (dl == null) {
+                    TextButton(onClick = {
+                        updateErr = null
+                        updateProgress = 0
+                        scope.launch {
+                            val file = UpdateChecker.download(ctx, info.url) { p ->
+                                withContext(Dispatchers.Main) { updateProgress = p }
+                            }
+                            withContext(Dispatchers.Main) {
+                                updateProgress = null
+                                if (file == null) {
+                                    updateErr = "Download failed — check your internet, or tap “Get it from GitHub instead”."
+                                } else {
+                                    val started = UpdateChecker.install(ctx, file)
+                                    if (started) {
+                                        UpdateChecker.dismiss(ctx, info.tag)
+                                        update = null
+                                        Toast.makeText(ctx, "Installer opened — tap Install to finish.",
+                                            Toast.LENGTH_LONG).show()
+                                    } else {
+                                        updateErr = "Allow “install unknown apps” for Echo Tracks, then tap Update again."
+                                    }
+                                }
+                            }
+                        }
+                    }) { Text("Update now") }
+                }
             },
             dismissButton = {
                 TextButton(onClick = {
-                    UpdateChecker.dismiss(ctx, info.tag); update = null
-                }) { Text("Later") }
+                    if (dl == null) {
+                        UpdateChecker.dismiss(ctx, info.tag)
+                        update = null
+                    }
+                }) { Text(if (dl == null) "Later" else "Downloading…") }
             }
         )
     }
@@ -296,9 +477,28 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        AssistChip(onClick = {}, label = { Text(t.category.name.lowercase()) })
-                        AssistChip(onClick = {}, label = { Text(t.source.name) })
-                        AssistChip(onClick = {}, label = { Text(t.spendType.name) })
+                        AssistChip(
+                            onClick = {
+                                query = t.category.name.lowercase(); dayKey = null; monthKey = null; selectedTx = null
+                                nav.navigate("Echoes") { launchSingleTop = true }
+                            },
+                            label = { Text(t.category.name.lowercase() + " ›") }
+                        )
+                        AssistChip(
+                            onClick = {
+                                query = ""; dayKey = null; monthKey = null; sourceTab = t.source.name; selectedTx = null
+                                nav.navigate("Echoes") { launchSingleTop = true }
+                            },
+                            label = { Text(t.source.name + " ›") }
+                        )
+                        AssistChip(
+                            onClick = {
+                                selectedTx = null
+                                infoTitle = spendTypeTitle(t.spendType)
+                                infoBody = spendTypeBody(t.spendType)
+                            },
+                            label = { Text(t.spendType.name + " ›") }
+                        )
                     }
                     Text(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(t.dateMillis)))
                     Text("Code: ${t.code}", style = MaterialTheme.typography.bodySmall)
@@ -306,20 +506,24 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                         "Balance after: ${"%,.0f".format(t.balanceAfter)}",
                         style = MaterialTheme.typography.bodySmall, color = Sky
                     )
-                    if (t.rawSms.isNotBlank()) Card(colors = CardDefaults.cardColors(containerColor = Midnight)) {
+                    if (t.rawSms.isNotBlank()) Card(colors = CardDefaults.cardColors(containerColor = echoDeep())) {
                         Text(
                             t.rawSms.take(500),
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(10.dp)
                         )
                     }
-                    if (t.category == Category.UNCATEGORIZED && !teachOpen) {
+                    // Teach / re-teach: available on EVERY transaction, not just uncategorized ones
+                    if (!teachOpen) {
                         Button(
                             onClick = { teachOpen = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Midnight)
-                        ) { Text("🏷️ Teach Echo — classify this") }
+                        ) {
+                            Text(if (t.category == Category.UNCATEGORIZED) "🏷️ Teach Echo — classify this"
+                            else "🏷️ Re-teach Echo — fix category")
+                        }
                     }
-                    if (teachOpen || t.category == Category.UNCATEGORIZED && teachOpen) {
+                    if (teachOpen) {
                         OutlinedTextField(
                             value = teachKey, onValueChange = { teachKey = it.take(40) },
                             label = { Text("Keyword to remember (e.g. kibandaski)") },
@@ -344,12 +548,11 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                                     Toast.makeText(ctx, "Type a keyword first", Toast.LENGTH_SHORT).show()
                                 } else {
                                     LearnStore.set(ctx, teachKey.trim().lowercase(), teachCat)
-                                    // regroup ALL similar in memory instantly
+                                    // regroup ALL similar in memory instantly (incl. already-categorized ones)
                                     val key = teachKey.trim().lowercase()
                                     txs = txs.map { x ->
-                                        if (("${x.who} ${x.rawSms}".lowercase().contains(key)) &&
-                                            x.category == Category.UNCATEGORIZED
-                                        ) x.copy(category = teachCat) else x
+                                        if ("${x.who} ${x.rawSms}".lowercase().contains(key))
+                                            x.copy(category = teachCat) else x
                                     }
                                     selectedTx = selectedTx?.copy(category = teachCat)
                                     teachOpen = false
@@ -401,13 +604,31 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
         return
     }
 
-    val from = when (rangeKey) {
-        "TODAY" -> EchoStats.startOfDay(System.currentTimeMillis())
-        "7D" -> EchoStats.daysAgo(7)
-        "1M" -> EchoStats.monthsAgo(1); "3M" -> EchoStats.monthsAgo(3); "6M" -> EchoStats.monthsAgo(6); else -> null
+    // Day drill-in wins, then month drill-in, then history year, then quick ranges (mutually exclusive in UI).
+    val yearBounds = remember(yearKey) {
+        yearKey.toIntOrNull()?.let { EchoStats.yearBounds(it) }
     }
-    val filtered = remember(txs, from, hideNoise, sourceTab, query) {
-        var list = EchoStats.inRange(txs, from, null)
+    val monthBounds = remember(monthKey) {
+        monthKey?.let { EchoStats.monthBounds(it) }
+    }
+    val from = when {
+        dayKey != null -> dayKey
+        monthBounds != null -> monthBounds.first
+        yearBounds != null -> yearBounds.first
+        else -> when (rangeKey) {
+            "TODAY" -> EchoStats.startOfDay(System.currentTimeMillis())
+            "7D" -> EchoStats.daysAgo(7)
+            "1M" -> EchoStats.monthsAgo(1); "3M" -> EchoStats.monthsAgo(3); "6M" -> EchoStats.monthsAgo(6); else -> null
+        }
+    }
+    val to = when {
+        dayKey != null -> dayKey!! + 24L * 60 * 60 * 1000 - 1
+        monthBounds != null -> monthBounds.second
+        else -> yearBounds?.second
+    }
+    val years = remember(txs) { EchoStats.yearsOf(txs) }
+    val filtered = remember(txs, from, to, hideNoise, sourceTab, query) {
+        var list = EchoStats.inRange(txs, from, to)
         if (sourceTab != "ALL") list = list.filter { it.source.name == sourceTab }
         list = EchoStats.visible(list, hideNoise)
         EchoStats.search(list, query)
@@ -417,6 +638,8 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
 
     fun filterToEchoes(q: String) {
         query = q
+        dayKey = null
+        monthKey = null
         nav.navigate("Echoes") { launchSingleTop = true }
     }
 
@@ -434,16 +657,23 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
 
     Scaffold(
         bottomBar = {
-            NavigationBar(containerColor = CardBg) {
-                listOf("Home", "Echoes", "Stats", "Sources", "Menu").forEach { s ->
+            NavigationBar(containerColor = echoCard()) {
+                val tabs = listOf(
+                    "Home" to Icons.Filled.Home,
+                    "Echoes" to Icons.AutoMirrored.Filled.ReceiptLong,
+                    "Stats" to Icons.Filled.PieChart,
+                    "Sources" to Icons.Filled.AccountBalance,
+                    "Menu" to Icons.Filled.Menu
+                )
+                tabs.forEach { (s, icon) ->
                     NavigationBarItem(
                         selected = currentRoute == s,
                         onClick = { nav.navigate(s) { launchSingleTop = true } },
                         label = { Text(s) },
                         icon = {
-                            Text(
-                                when (s) { "Home" -> "◉"; "Echoes" -> "☰"; "Stats" -> "◈"; "Sources" -> "⬣"; else -> "☰" },
-                                color = if (currentRoute == s) Mint else Ink
+                            Icon(
+                                imageVector = icon, contentDescription = s,
+                                tint = if (currentRoute == s) Mint else echoInk().copy(alpha = 0.7f)
                             )
                         }
                     )
@@ -456,28 +686,32 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                 composable("Home") {
                     DashboardHome(
                         spent = spent, income = income, net = net, txs = filtered,
+                        allTxs = txs,
                         loading = loading, granted = granted,
                         onGrant = { launcher.launch(Manifest.permission.READ_SMS) },
-                        onRescan = {
-                            loading = true
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val tx = loadAndCache()
-                                    withContext(Dispatchers.Main) {
-                                        txs = tx; loading = false
-                                        Toast.makeText(ctx, "${tx.size} echoes refreshed", Toast.LENGTH_SHORT).show()
-                                    }
-                                } catch (e: Exception) {
-                                    withContext(Dispatchers.Main) {
-                                        loading = false
-                                        Toast.makeText(ctx, "Rescan failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        },
+                        onRescan = { rescan() },
                         hideNoise = hideNoise, onToggleNoise = { hideNoise = !hideNoise },
-                        rangeKey = rangeKey, onRange = { rangeKey = it },
-                        sourceTab = sourceTab, onSource = { sourceTab = it },
+                        rangeKey = rangeKey, onRange = { rangeKey = it; yearKey = "ALL"; dayKey = null; monthKey = null },
+                        sourceTab = sourceTab, onSource = { sourceTab = it; dayKey = null; monthKey = null },
+                        years = years, yearKey = yearKey,
+                        onYear = { yearKey = it; if (it != "ALL") rangeKey = "ALL"; dayKey = null; monthKey = null },
+                        dayKey = dayKey,
+                        onDayClick = { start ->
+                            dayKey = start; monthKey = null; rangeKey = "ALL"; yearKey = "ALL"
+                            nav.navigate("Echoes") { launchSingleTop = true }
+                        },
+                        onClearDay = { dayKey = null },
+                        monthKey = monthKey,
+                        onMonthClick = { start ->
+                            monthKey = start; dayKey = null; rangeKey = "ALL"; yearKey = "ALL"
+                            nav.navigate("Echoes") { launchSingleTop = true }
+                        },
+                        onClearMonth = { monthKey = null },
+                        recents = recents,
+                        onClearRecents = {
+                            AppPrefs.clearRecentQueries(ctx)
+                            recents = emptyList()
+                        },
                         query = query, onQuery = { query = it },
                         onTxClick = { selectedTx = it },
                         onCategoryClick = { c -> filterToEchoes(c.name.lowercase()) },
@@ -538,14 +772,34 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                 composable("Echoes") {
                     EchoesGrouped(
                         txs = filtered, query = query, onQuery = { query = it },
+                        loading = loading, onRefresh = { rescan() },
+                        recents = recents,
+                        onClearRecents = {
+                            AppPrefs.clearRecentQueries(ctx)
+                            recents = emptyList()
+                        },
                         onTxClick = { selectedTx = it },
-                        onClearFilters = { query = ""; rangeKey = "ALL"; sourceTab = "ALL"; hideNoise = false }
+                        onClearFilters = { query = ""; rangeKey = "ALL"; sourceTab = "ALL"; yearKey = "ALL"; dayKey = null; monthKey = null; hideNoise = false },
+                        dayKey = dayKey, monthKey = monthKey,
+                        onClearDay = { dayKey = null }, onClearMonth = { monthKey = null }
                     )
                 }
                 composable("Stats") {
-                    StatsDash(txs = filtered, onCategoryClick = { c -> filterToEchoes(c.name.lowercase()) })
+                    StatsDash(
+                        txs = filtered, allTxs = txs,
+                        onCategoryClick = { c -> filterToEchoes(c.name.lowercase()) },
+                        onMonthClick = { start ->
+                            monthKey = start; dayKey = null; rangeKey = "ALL"; yearKey = "ALL"
+                            nav.navigate("Echoes") { launchSingleTop = true }
+                        }
+                    )
                 }
-                composable("Sources") { SourcesScreen(all = txs, tab = sourceTab, onTab = { sourceTab = it }) }
+                composable("Sources") {
+                    SourcesScreen(
+                        all = txs, tab = sourceTab, onTab = { sourceTab = it },
+                        onUpdateFound = { info -> update = info; updateErr = null; updateProgress = null }
+                    )
+                }
                 composable("Menu") {
                     SettingsScreen(
                         onPrefsChanged = onPrefsChanged,
@@ -562,6 +816,24 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
 
 fun hasSms(ctx: android.content.Context) =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+
+fun spendTypeTitle(s: SpendType): String = when (s) {
+    SpendType.REAL_SPEND -> "Real spend"
+    SpendType.INCOME -> "Income"
+    SpendType.SELF_TRANSFER -> "Self transfer (hidden by default)"
+    SpendType.FEE -> "Fee / charge (hidden by default)"
+    SpendType.LOAN -> "Loan / Fuliza (hidden by default)"
+    SpendType.UNKNOWN -> "Reversal / refund (hidden by default)"
+}
+
+fun spendTypeBody(s: SpendType): String = when (s) {
+    SpendType.REAL_SPEND -> "Money that actually left your pocket — counts in totals, charts and budgets."
+    SpendType.INCOME -> "Money received — counts as income in totals and the trend chart."
+    SpendType.SELF_TRANSFER -> "You moved your own money (e.g. M-PESA to bank). Untick “Hide fees, loans & reversals” on Home to see these."
+    SpendType.FEE -> "Transaction costs and charges. Excluded from spend totals so they don't inflate your budget."
+    SpendType.LOAN -> "Fuliza / M-Shwari / loan activity. Kept out of spend totals — repayments show as their own echoes."
+    SpendType.UNKNOWN -> "Reversals and refunds. Hidden from totals so returned money isn't double-counted."
+}
 
 // ---------- LOCK ----------
 @Composable
@@ -612,16 +884,24 @@ fun LockGate(pinInput: String, onInput: (String) -> Unit, onUnlock: () -> Unit,
 @Composable
 fun StatPill(label: String, value: Double, color: Color, modifier: Modifier = Modifier) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Midnight.copy(alpha = 0.65f)),
+        colors = CardDefaults.cardColors(containerColor = echoDeep().copy(alpha = 0.65f)),
         shape = RoundedCornerShape(14.dp), modifier = modifier
     ) {
         Column(Modifier.padding(12.dp)) {
-            Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = Ink.copy(alpha = 0.7f))
+            Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = echoInk().copy(alpha = 0.7f))
             Text(
                 "%,.0f".format(value),
                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = color
             )
         }
+    }
+}
+
+@Composable
+fun LegendDot(color: Color, text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Canvas(Modifier.size(10.dp)) { drawCircle(color) }
+        Text(text, style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -641,7 +921,8 @@ fun SectionHeader(title: String, accent: Color = Mint, onSeeAll: (() -> Unit)? =
 // Ripple comes free with Modifier.clickable on every section row.
 
 @Composable
-fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {}) {
+fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {},
+             onDetails: (String, String) -> Unit = { _, _ -> }) {
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var goalTxt by remember { mutableStateOf(BudgetStore.get(ctx).toInt().toString()) }
@@ -655,13 +936,13 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {}) {
         if (savedFlash) { kotlinx.coroutines.delay(1500); savedFlash = false }
     }
     Card(
-        colors = CardDefaults.cardColors(containerColor = CardBg),
+        colors = CardDefaults.cardColors(containerColor = echoCard()),
         shape = RoundedCornerShape(18.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            Modifier.background(Brush.verticalGradient(listOf(CardBg, Color(0xFF101F36)))).padding(18.dp)
+            Modifier.background(goalBrush()).padding(18.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -671,8 +952,16 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {}) {
                 )
                 TextButton(onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    Toast.makeText(ctx, "Spent ${"%,.0f".format(monthSpend)} this month", Toast.LENGTH_SHORT).show()
-                }) { Text(if (savedFlash) "✓ Saved!" else "Details", color = if (savedFlash) Mint else Mint) }
+                    val left = goal - monthSpend
+                    val days = EchoStats.daysLeftInMonth()
+                    onDetails(
+                        "Monthly goal: ${"%,.0f".format(goal)}",
+                        "Spent ${"%,.0f".format(monthSpend)} (${(pct * 100).toInt()}% used), " +
+                            (if (left >= 0) "${"%,.0f".format(left)} left" else "${"%,.0f".format(-left)} over") +
+                            " with $days day(s) left in the month." +
+                            if (days > 0 && left > 0) " That's ~${"%,.0f".format(left / days)} per day to stay on track." else ""
+                    )
+                }) { Text(if (savedFlash) "✓ Saved!" else "Details", color = Mint) }
             }
             Spacer(Modifier.height(4.dp))
             Text(
@@ -682,12 +971,12 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {}) {
             Text(
                 if (left >= 0) "${(pct * 100).toInt()}% used • ${"%,.0f".format(left)} left"
                 else "${(pct * 100).toInt()}% used • ${"%,.0f".format(-left)} over",
-                style = MaterialTheme.typography.bodySmall, color = Ink.copy(alpha = 0.75f)
+                style = MaterialTheme.typography.bodySmall, color = echoInk().copy(alpha = 0.75f)
             )
             Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(
                 progress = { animPct },
-                color = barColor, trackColor = Midnight,
+                color = barColor, trackColor = echoDeep(),
                 modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(8.dp))
                     .clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -755,7 +1044,7 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {}) {
 fun QuoteFooter() {
     val q = remember { MoneyQuotes.ofDay() }
     Card(
-        colors = CardDefaults.cardColors(containerColor = CardHi),
+        colors = CardDefaults.cardColors(containerColor = echoCardHi()),
         shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -764,7 +1053,7 @@ fun QuoteFooter() {
             Text(
                 "“${q.text}”",
                 fontStyle = FontStyle.Italic, fontFamily = FontFamily.Serif,
-                style = MaterialTheme.typography.bodyMedium, color = Ink
+                style = MaterialTheme.typography.bodyMedium, color = echoInk()
             )
             Spacer(Modifier.height(6.dp))
             Text(
@@ -777,53 +1066,94 @@ fun QuoteFooter() {
 }
 
 // ---------- HOME DASHBOARD ----------
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTransaction>,
                   loading: Boolean, granted: Boolean, onGrant: () -> Unit, onRescan: () -> Unit,
                   hideNoise: Boolean, onToggleNoise: () -> Unit,
                   rangeKey: String, onRange: (String) -> Unit,
                   sourceTab: String, onSource: (String) -> Unit, onExport: () -> Unit,
+                  years: List<Int> = emptyList(), yearKey: String = "ALL", onYear: (String) -> Unit = {},
                   query: String = "", onQuery: (String) -> Unit = {},
+                  dayKey: Long? = null, onDayClick: (Long) -> Unit = {}, onClearDay: () -> Unit = {},
+                  monthKey: Long? = null, onMonthClick: (Long) -> Unit = {}, onClearMonth: () -> Unit = {},
+                  allTxs: List<EchoTransaction> = txs,
+                  recents: List<String> = emptyList(), onClearRecents: () -> Unit = {},
                   onTxClick: (EchoTransaction) -> Unit = {},
                   onCategoryClick: (Category) -> Unit = {},
                   onPersonClick: (String) -> Unit = {},
                   onGoEchoes: () -> Unit = {}, onGoStats: () -> Unit = {},
                   onInfo: (String, String) -> Unit = { _, _ -> },
                   onWeeklyPdf: () -> Unit = {}, onMonthlyPdf: () -> Unit = {}) {
-    val trend = remember(txs) { EchoStats.perDay(txs, 14) }
-    val maxT = (trend.maxOfOrNull { it.second } ?: 1.0).coerceAtLeast(1.0)
+    val spendBars = remember(txs) { EchoStats.perDay(txs, 14, Direction.OUT) }
+    val inBars = remember(txs) { EchoStats.perDay(txs, 14, Direction.IN) }
+    val maxT = ((spendBars + inBars).maxOfOrNull { it.amount } ?: 1.0).coerceAtLeast(1.0)
+    val peak = spendBars.maxByOrNull { it.amount }
     val byCat = remember(txs) { EchoStats.byCategory(txs).take(5) }
     val maxC = (byCat.firstOrNull()?.second ?: 1.0).coerceAtLeast(1.0)
     val top = remember(txs) { EchoStats.topRecipients(txs, 5) }
     val ctx2 = LocalContext.current
-    val monthSpend = remember(txs) { EchoStats.monthSpent(EchoStats.visible(txs, true)) }
-    val bills = remember(txs) { EchoStats.upcomingBills(EchoStats.visible(txs, false)) }
-    val (greet, greetSub, greetEmoji) = remember { MoneyQuotes.greeting() }
-    val haptic = LocalHapticFeedback.current
-    fun tap(fn: () -> Unit) {
-        try { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) } catch (_: Exception) { }
-        fn()
+    // Global-scope stats must ignore view filters (day/month/year/range) so the
+    // budget goal, bills and 12-month history stay correct while drilling in.
+    val monthSpend = remember(allTxs) { EchoStats.monthSpent(EchoStats.visible(allTxs, true)) }
+    var billsTick by remember { mutableStateOf(0) }
+    val bills = remember(allTxs, billsTick) {
+        EchoStats.upcomingBills(EchoStats.visible(allTxs, false), BillStore.all(ctx2))
     }
-    val uncatCount = remember(txs) { txs.count { it.category == Category.UNCATEGORIZED } }
+    val yearMonths = remember(allTxs) { EchoStats.perMonth(EchoStats.visible(allTxs, true), 12) }
+    val (greet, greetSub, greetEmoji) = remember { MoneyQuotes.greeting() }
+    val tap = rememberTap()
+    val uncatCount = remember(allTxs) { allTxs.count { it.category == Category.UNCATEGORIZED } }
+    val activeFilters = (if (rangeKey != "ALL") 1 else 0) + (if (sourceTab != "ALL") 1 else 0) +
+        (if (yearKey != "ALL") 1 else 0) + (if (monthKey != null) 1 else 0) +
+        (if (dayKey != null) 1 else 0) + (if (!hideNoise) 1 else 0) + (if (query.isNotBlank()) 1 else 0)
+    var showFilters by remember { mutableStateOf(activeFilters > 0) }
 
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            OutlinedTextField(
-                value = query, onValueChange = onQuery,
-                label = { Text("Search name, amount, category… e.g. naivas, >5000, 1k-5k") },
-                supportingText = { Text("Try: kplc • 5000 • >5000 • <1000 • 1000-5000 • 5k") },
-                modifier = Modifier.fillMaxWidth(), singleLine = true
-            )
-        }
+    PullToRefreshBox(
+        isRefreshing = loading, onRefresh = onRescan, modifier = Modifier.fillMaxSize()
+    ) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            stickyHeader {
+                Column(
+                    Modifier.background(MaterialTheme.colorScheme.background).padding(bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = query, onValueChange = onQuery,
+                        label = { Text("Search name, amount, category… e.g. naivas, >5000, 1k-5k") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true
+                    )
+                    SearchSuggestRow(onPick = onQuery, recents = recents, onClearRecents = onClearRecents)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        StatPill("Spent", spent, Rose, Modifier.weight(1f))
+                        StatPill("In", income, Mint, Modifier.weight(1f))
+                        StatPill("Net", net, if (net >= 0) Mint else Amber, Modifier.weight(1f))
+                    }
+                    if (dayKey != null) {
+                        AssistChip(onClick = onClearDay, label = {
+                            Text("📅 ${java.text.DateFormat.getDateInstance().format(java.util.Date(dayKey))} — tap ✕ to clear")
+                        })
+                    }
+                    if (monthKey != null) {
+                        AssistChip(onClick = onClearMonth, label = {
+                            Text("🗓 ${java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.US).format(java.util.Date(monthKey))} — tap ✕ to clear")
+                        })
+                    }
+                }
+            }
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = CardBg),
+                colors = CardDefaults.cardColors(containerColor = echoCard()),
                 shape = RoundedCornerShape(20.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    Modifier.background(HeroBrush).padding(20.dp)
+                    Modifier.background(heroBrush()).padding(20.dp)
                 ) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -833,7 +1163,7 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                                 fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic,
                                 fontFamily = FontFamily.Serif
                             )
-                            Text(greetSub, style = MaterialTheme.typography.bodySmall, color = Ink.copy(alpha = 0.8f))
+                            Text(greetSub, style = MaterialTheme.typography.bodySmall, color = echoInk().copy(alpha = 0.8f))
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             TextButton(onClick = onExport) { Text("CSV", color = Mint) }
@@ -842,12 +1172,6 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                         }
                     }
                     Spacer(Modifier.height(10.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        StatPill("Spent", spent, Rose, Modifier.weight(1f))
-                        StatPill("In", income, Mint, Modifier.weight(1f))
-                        StatPill("Net", net, if (net >= 0) Mint else Amber, Modifier.weight(1f))
-                    }
-                    Spacer(Modifier.height(6.dp))
                     Text(if (net >= 0) "Net +${"%,.0f".format(net)} — saving" else "Net ${"%,.0f".format(net)} — overspent",
                         color = if (net >= 0) Mint else Rose,
                         fontWeight = FontWeight.Bold,
@@ -869,20 +1193,9 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            AssistChip(onClick = {
-                                onInfo(
-                                    "Savings rate: $rate%",
-                                    "Income ${"%,.0f".format(income)} − spent ${"%,.0f".format(spent)} in this view. Tap View breakdown for the full split."
-                                )
-                                onGoStats()
-                            }, label = { Text("Saved $rate%") })
-                            AssistChip(onClick = {
-                                onInfo(
-                                    if (delta <= 0) "Spending down ${-delta}%" else "Spending up $delta%",
-                                    "This month ${"%,.0f".format(thisM)} vs last ${"%,.0f".format(lastM)}. Tap View breakdown for categories."
-                                )
-                                onGoStats()
-                            }, label = {
+                            AssistChip(onClick = { tap { onGoStats() } },
+                                label = { Text("Saved $rate%") })
+                            AssistChip(onClick = { tap { onGoStats() } }, label = {
                                 Text(if (delta <= 0) "↓ ${-delta}% vs last month" else "↑ $delta% vs last month")
                             })
                         }
@@ -896,17 +1209,52 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                         modifier = Modifier.clickable { onGoStats() })
                     Spacer(Modifier.height(10.dp))
                     Row(
+                        Modifier.fillMaxWidth().clickable { showFilters = !showFilters },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (activeFilters > 0) "🎛 Filters • $activeFilters on" else "🎛 Filters",
+                            color = Mint, fontWeight = FontWeight.Bold
+                        )
+                        Text(if (showFilters) "▾" else "▸", color = Mint, fontWeight = FontWeight.Bold)
+                    }
+                    if (showFilters) {
+                    Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf("TODAY", "7D", "ALL", "1M", "3M", "6M").forEach { k ->
-                            FilterChip(selected = rangeKey == k, onClick = { onRange(k) }, label = { Text(k) })
+                            FilterChip(selected = rangeKey == k, onClick = { tap { onRange(k) } }, label = { Text(k) })
                         }
                     }
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("ALL", "MPESA", "BANK").forEach { k ->
-                            FilterChip(selected = sourceTab == k, onClick = { onSource(k) }, label = { Text(k) })
+                            FilterChip(selected = sourceTab == k, onClick = { tap { onSource(k) } }, label = { Text(k) })
+                        }
+                    }
+                    if (years.size > 1) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "📚 History",
+                            style = MaterialTheme.typography.labelMedium, color = Sky,
+                            fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic,
+                            fontFamily = FontFamily.Serif
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(selected = yearKey == "ALL", onClick = { tap { onYear("ALL") } }, label = { Text("All years") })
+                            years.forEach { y ->
+                                FilterChip(
+                                    selected = yearKey == y.toString(),
+                                    onClick = { tap { onYear(y.toString()) } },
+                                    label = { Text(y.toString()) }
+                                )
+                            }
                         }
                     }
                     Row(
@@ -915,6 +1263,7 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                     ) {
                         Checkbox(checked = hideNoise, onCheckedChange = { onToggleNoise() })
                         Text("Hide fees, loans & reversals", style = MaterialTheme.typography.bodySmall)
+                    }
                     }
                     if (loading) { Spacer(Modifier.height(6.dp)); LinearProgressIndicator(color = Mint); Text("Reading SMS…", style = MaterialTheme.typography.bodySmall) }
                     if (!granted) {
@@ -929,6 +1278,7 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
         item {
             GoalCard(
                 monthSpend = monthSpend,
+                onDetails = onInfo,
                 onSaved = { g ->
                     OverspendAlerter.check(ctx2, monthSpend, g)
                 }
@@ -936,29 +1286,56 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
         }
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = CardBg),
-                modifier = Modifier.fillMaxWidth().clickable { tap { if (bills.isNotEmpty()) onPersonClick(bills.first().name) } }
+                colors = CardDefaults.cardColors(containerColor = echoCard()),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Bill reminders", color = Amber, fontWeight = FontWeight.Bold)
+                        EchoH("Bill reminders", Amber)
                         if (bills.isNotEmpty()) TextButton(onClick = onGoEchoes) { Text("View all", color = Amber) }
                     }
                     Spacer(Modifier.height(6.dp))
-                    if (bills.isEmpty()) Text("No repeating bills detected yet. Pay KPLC / DSTV twice and I'll track them.",
+                    if (bills.isEmpty()) Text("No repeating bills detected yet. Pay KPLC / DSTV / rent twice and I'll track them.",
                         style = MaterialTheme.typography.bodySmall)
                     bills.forEach { b ->
                         Row(
-                            Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { tap { onPersonClick(b.name) } },
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(b.name, fontWeight = FontWeight.SemiBold)
-                                Text("Avg ${"%,.0f".format(b.avgAmount)}", style = MaterialTheme.typography.bodySmall)
+                            Column(
+                                Modifier.weight(1f).clickable { tap { onPersonClick(b.name) } }
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(b.name, fontWeight = FontWeight.SemiBold)
+                                    if (b.userMarked) Text("✓ paid", style = MaterialTheme.typography.labelSmall, color = Mint)
+                                }
+                                Text(
+                                    if (b.avgAmount > 0) "Avg ${"%,.0f".format(b.avgAmount)}" else "Confirmed by you",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
-                            Text(if (b.overdue) "OVERDUE ${-b.daysLeft}d" else "due in ${b.daysLeft}d",
-                                color = if (b.overdue) Rose else Amber, fontWeight = FontWeight.Bold)
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(if (b.overdue) "OVERDUE ${-b.daysLeft}d" else "due in ${b.daysLeft}d",
+                                    color = if (b.overdue) Rose else Amber, fontWeight = FontWeight.Bold)
+                                if (b.userMarked) {
+                                    TextButton(onClick = {
+                                        tap {
+                                            BillStore.clearPaid(ctx2, b.key.ifBlank { b.name })
+                                            billsTick++
+                                            Toast.makeText(ctx2, "${b.name} paid mark undone", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }) { Text("Undo", color = Rose, style = MaterialTheme.typography.labelMedium) }
+                                } else {
+                                    TextButton(onClick = {
+                                        tap {
+                                            BillStore.setPaid(ctx2, b.key.ifBlank { b.name })
+                                            billsTick++
+                                            Toast.makeText(ctx2, "${b.name} marked paid — due date reset", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }) { Text("✓ Paid", color = Mint, style = MaterialTheme.typography.labelMedium) }
+                                }
+                            }
                         }
                     }
                 }
@@ -966,36 +1343,105 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
         }
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = CardBg),
+                colors = CardDefaults.cardColors(containerColor = echoCard()),
                 modifier = Modifier.fillMaxWidth().clickable { tap { onGoEchoes() } }
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Spend trend — last 14 days", color = Mint, fontWeight = FontWeight.Bold)
+                        EchoH("Spend trend — last 14 days")
                         TextButton(onClick = onGoEchoes) { Text("Open", color = Mint) }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Canvas(Modifier.fillMaxWidth().height(110.dp)) {
-                        val n = trend.size; if (n == 0) return@Canvas
-                        val bw = size.width / (n * 1.6f)
-                        trend.forEachIndexed { i, (_, v) ->
-                            val h = (v / maxT * (size.height - 20)).toFloat()
-                            drawRect(Mint, topLeft = androidx.compose.ui.geometry.Offset(i * 1.6f * bw + bw * 0.3f, size.height - h),
-                                size = Size(bw, h))
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LegendDot(Mint, "Spent")
+                        LegendDot(Sky, "In")
+                        Text("Tap a day to open it", style = MaterialTheme.typography.labelSmall,
+                            color = echoInk().copy(alpha = 0.6f))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Canvas(
+                        Modifier.fillMaxWidth().height(120.dp).pointerInput(spendBars, inBars, dayKey) {
+                            detectTapGestures { off ->
+                                val n = spendBars.size; if (n == 0) return@detectTapGestures
+                                val slot = size.width / (n * 1.6f)
+                                val i = (off.x / (1.6f * slot)).toInt()
+                                if (i in spendBars.indices) tap { onDayClick(spendBars[i].dayStart) }
+                            }
+                        }
+                    ) {
+                        val n = spendBars.size; if (n == 0) return@Canvas
+                        val slot = size.width / (n * 1.6f)
+                        val bw = slot * 0.55f
+                        spendBars.forEachIndexed { i, b ->
+                            val x = i * 1.6f * slot
+                            val hs = (b.amount / maxT * (size.height - 20)).toFloat()
+                            val hi = ((inBars.getOrNull(i)?.amount ?: 0.0) / maxT * (size.height - 20)).toFloat()
+                            drawRect(
+                                if (dayKey == b.dayStart) Amber else Mint,
+                                topLeft = androidx.compose.ui.geometry.Offset(x + slot * 0.1f, size.height - hs),
+                                size = Size(bw, hs)
+                            )
+                            if (hi > 1f) drawRect(
+                                Sky,
+                                topLeft = androidx.compose.ui.geometry.Offset(x + slot * 0.85f, size.height - hi),
+                                size = Size(bw, hi)
+                            )
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(trend.firstOrNull()?.first ?: "", style = MaterialTheme.typography.labelSmall)
-                        Text(trend.lastOrNull()?.first ?: "today", style = MaterialTheme.typography.labelSmall)
+                        Text(spendBars.firstOrNull()?.label ?: "", style = MaterialTheme.typography.labelSmall)
+                        if (peak != null && peak.amount > 0) Text(
+                            "Peak ${peak.label}: ${"%,.0f".format(peak.amount)}",
+                            style = MaterialTheme.typography.labelSmall, color = Amber
+                        )
+                        Text(spendBars.lastOrNull()?.label ?: "today", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
+            val maxM = (yearMonths.maxOfOrNull { it.amount } ?: 1.0).coerceAtLeast(1.0)
+            Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Where it went", color = Mint, fontWeight = FontWeight.Bold)
+                        EchoH("Last 12 months — tap a month")
+                        TextButton(onClick = onGoStats) { Text("Stats", color = Mint) }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Canvas(
+                        Modifier.fillMaxWidth().height(90.dp).pointerInput(yearMonths, monthKey) {
+                            detectTapGestures { off ->
+                                val n = yearMonths.size; if (n == 0) return@detectTapGestures
+                                val bw = size.width / (n * 1.6f)
+                                val i = (off.x / (1.6f * bw)).toInt()
+                                if (i in yearMonths.indices) tap { onMonthClick(yearMonths[i].monthStart) }
+                            }
+                        }
+                    ) {
+                        val n = yearMonths.size; if (n == 0) return@Canvas
+                        val bw = size.width / (n * 1.6f)
+                        yearMonths.forEachIndexed { i, m ->
+                            val h = (m.amount / maxM * (size.height - 20)).toFloat()
+                            drawRect(
+                                if (monthKey == m.monthStart) Amber else if (i == n - 1) Amber.copy(alpha = 0.85f) else Mint,
+                                topLeft = androidx.compose.ui.geometry.Offset(i * 1.6f * bw + bw * 0.3f, size.height - h),
+                                size = Size(bw, h)
+                            )
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(yearMonths.firstOrNull()?.label ?: "", style = MaterialTheme.typography.labelSmall)
+                        Text("%,.0f total".format(yearMonths.sumOf { it.amount }), style = MaterialTheme.typography.labelSmall, color = Amber)
+                        Text(yearMonths.lastOrNull()?.label ?: "", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        EchoH("Where it went")
                         TextButton(onClick = onGoStats) { Text("All", color = Mint) }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -1007,17 +1453,17 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(c.name.lowercase() + " ›"); Text("%,.0f".format(v), fontWeight = FontWeight.Bold)
                             }
-                            LinearProgressIndicator(progress = { (v / maxC).toFloat() }, color = Mint, trackColor = Midnight, modifier = Modifier.fillMaxWidth().height(6.dp))
+                            LinearProgressIndicator(progress = { (v / maxC).toFloat() }, color = Mint, trackColor = echoDeep(), modifier = Modifier.fillMaxWidth().height(6.dp))
                         }
                     }
                 }
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
+            Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Top destinations", color = Mint, fontWeight = FontWeight.Bold)
+                        EchoH("Top destinations")
                         TextButton(onClick = onGoEchoes) { Text("See all", color = Mint) }
                     }
                     Spacer(Modifier.height(6.dp))
@@ -1033,13 +1479,13 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Recent echoes", color = Mint, fontWeight = FontWeight.Bold)
+                EchoH("Recent echoes")
                 TextButton(onClick = onGoEchoes) { Text("See all", color = Mint) }
             }
         }
         items(txs.take(30)) { t ->
             Card(
-                colors = CardDefaults.cardColors(containerColor = CardBg),
+                colors = CardDefaults.cardColors(containerColor = echoCard()),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth().clickable { onTxClick(t) }
             ) {
@@ -1059,26 +1505,56 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                 }
             }
         }
-        item {
-            QuoteFooter()
+            item {
+                QuoteFooter()
+            }
         }
     }
 }
 
 // ---------- ECHOES grouped by day ----------
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun EchoesGrouped(
     txs: List<EchoTransaction>, query: String, onQuery: (String) -> Unit,
+    loading: Boolean = false, onRefresh: () -> Unit = {},
+    recents: List<String> = emptyList(), onClearRecents: () -> Unit = {},
     onTxClick: (EchoTransaction) -> Unit = {},
-    onClearFilters: () -> Unit = {}
+    onClearFilters: () -> Unit = {},
+    dayKey: Long? = null, monthKey: Long? = null,
+    onClearDay: () -> Unit = {}, onClearMonth: () -> Unit = {}
 ) {
+    val tap = rememberTap()
     val groups = remember(txs) {
         txs.groupBy { EchoStats.startOfDay(it.dateMillis) }.toList().sortedByDescending { it.first }.take(60)
     }
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            OutlinedTextField(value = query, onValueChange = onQuery, label = { Text("Search name, amount, category… e.g. >5000") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        }
+    PullToRefreshBox(
+        isRefreshing = loading, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()
+    ) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            stickyHeader {
+                Column(
+                    Modifier.background(MaterialTheme.colorScheme.background).padding(bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(value = query, onValueChange = onQuery, label = { Text("Search name, amount, category… e.g. >5000") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    SearchSuggestRow(onPick = onQuery, recents = recents, onClearRecents = onClearRecents)
+                    if (dayKey != null) {
+                        AssistChip(onClick = onClearDay, label = {
+                            Text("📅 ${java.text.DateFormat.getDateInstance().format(java.util.Date(dayKey))} — ✕")
+                        })
+                    }
+                    if (monthKey != null) {
+                        AssistChip(onClick = onClearMonth, label = {
+                            Text("🗓 ${java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.US).format(java.util.Date(monthKey))} — ✕")
+                        })
+                    }
+                }
+            }
         if (query.isNotBlank()) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1100,13 +1576,13 @@ fun EchoesGrouped(
             item {
                 val (s, inc) = EchoStats.totals(list)
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = CardHi),
+                    colors = CardDefaults.cardColors(containerColor = echoCardHi()),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().clickable { onQuery("") }
                 ) {
                     Column(
                         Modifier.background(
-                            Brush.horizontalGradient(listOf(CardHi, Color(0xFF0F2B26)))
+                            dayBrush()
                         ).padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
                         Text(
@@ -1130,7 +1606,7 @@ fun EchoesGrouped(
             }
             items(list) { t ->
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = CardBg),
+                    colors = CardDefaults.cardColors(containerColor = echoCard()),
                     shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth().clickable { tap { onTxClick(t) } }
                 ) {
@@ -1148,7 +1624,7 @@ fun EchoesGrouped(
                             Text(
                                 "${t.category.name.lowercase()}${if (t.category == Category.UNCATEGORIZED) " — tap to teach 🏷️" else ""}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (t.category == Category.UNCATEGORIZED) Amber else Ink.copy(alpha = 0.7f),
+                                color = if (t.category == Category.UNCATEGORIZED) Amber else echoInk().copy(alpha = 0.7f),
                                 fontStyle = if (t.category == Category.UNCATEGORIZED) FontStyle.Italic else FontStyle.Normal
                             )
                         }
@@ -1159,42 +1635,80 @@ fun EchoesGrouped(
                 }
             }
         }
-        item {
-            QuoteFooter()
+            item {
+                QuoteFooter()
+            }
         }
     }
 }
 
 // ---------- STATS ----------
 @Composable
-fun StatsDash(txs: List<EchoTransaction>, onCategoryClick: (Category) -> Unit = {}) {
+fun StatsDash(txs: List<EchoTransaction>, onCategoryClick: (Category) -> Unit = {},
+              allTxs: List<EchoTransaction> = txs, onMonthClick: (Long) -> Unit = {}) {
     val byCat = remember(txs) { EchoStats.byCategory(txs) }
     val total = (byCat.sumOf { it.second }).coerceAtLeast(1.0)
-    val palette = listOf(Mint, Amber, Rose, Color(0xFF7C9AFF), Color(0xFF9D7BFF), Color(0xFF5BD8C8))
+    val palette = listOf(Mint, Amber, Rose, Sky, Color(0xFF9D7BFF), Color(0xFF5BD8C8))
     val ctx = LocalContext.current
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val tap = rememberTap()
+    val (spent, income) = remember(txs) { EchoStats.totals(txs) }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = CardBg),
+                colors = CardDefaults.cardColors(containerColor = echoCard()),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Share by category — tap a row to drill in", color = Mint, fontWeight = FontWeight.Bold)
+                    EchoH("Share by category — tap a slice to drill in")
                     Spacer(Modifier.height(8.dp))
-                    Canvas(Modifier.size(150.dp).clickable {
-                        if (byCat.isNotEmpty()) onCategoryClick(byCat.first().first)
-                    }) {
-                        var start = -90f
-                        byCat.forEachIndexed { i, (_, v) ->
-                            val sweep = (v / total * 360).toFloat()
-                            drawArc(palette[i % palette.size], start, sweep, useCenter = false, style = Stroke(28f))
-                            start += sweep
+                    Box(Modifier.size(190.dp), contentAlignment = Alignment.Center) {
+                        Canvas(
+                            Modifier.size(190.dp).pointerInput(byCat) {
+                                detectTapGestures { off ->
+                                    if (byCat.isEmpty()) return@detectTapGestures
+                                    val cx = size.width / 2f; val cy = size.height / 2f
+                                    val dx = off.x - cx; val dy = off.y - cy
+                                    val inner = 60.dp.toPx()
+                                    if (dx * dx + dy * dy < inner * inner) return@detectTapGestures
+                                    val ang = (Math.toDegrees(
+                                        kotlin.math.atan2(dy.toDouble(), dx.toDouble())
+                                    ) + 360) % 360
+                                    val rel = (ang + 90) % 360
+                                    var start = 0.0
+                                    var hit: Category? = null
+                                    for ((c, v) in byCat) {
+                                        val sweep = v / total * 360
+                                        if (rel >= start && rel < start + sweep) { hit = c; break }
+                                        start += sweep
+                                    }
+                                    if (hit != null) tap { onCategoryClick(hit) }
+                                }
+                            }
+                        ) {
+                            var start = -90f
+                            byCat.forEachIndexed { i, (_, v) ->
+                                val sweep = (v / total * 360).toFloat()
+                                drawArc(palette[i % palette.size], start, sweep, useCenter = false, style = Stroke(30f))
+                                start += sweep
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "%,.0f".format(total),
+                                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold
+                            )
+                            Text("total spent", style = MaterialTheme.typography.labelSmall,
+                                color = echoInk().copy(alpha = 0.6f))
                         }
                     }
                     Spacer(Modifier.height(8.dp))
                     byCat.forEachIndexed { i, (c, v) ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { onCategoryClick(c) }.padding(vertical = 4.dp),
+                            Modifier.fillMaxWidth().clickable { tap { onCategoryClick(c) } }.padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("● ${c.name.lowercase()} ›", color = palette[i % palette.size])
@@ -1203,10 +1717,21 @@ fun StatsDash(txs: List<EchoTransaction>, onCategoryClick: (Category) -> Unit = 
                     }
                     if (byCat.isEmpty()) Text("No data in this view.")
                     else TextButton(onClick = {
-                        Toast.makeText(ctx, "Total ${"%,.0f".format(total)} across ${byCat.size} categories", Toast.LENGTH_SHORT).show()
+                        tap {
+                            Toast.makeText(ctx, "Total ${"%,.0f".format(total)} across ${byCat.size} categories", Toast.LENGTH_SHORT).show()
+                        }
                     }) { Text("Show total", color = Mint) }
                 }
             }
+        }
+        item {
+            SavingsGauge(spent = spent, income = income)
+        }
+        item {
+            MonthCompareCard(txs = allTxs, onCategoryClick = onCategoryClick)
+        }
+        item {
+            YearChart(txs = allTxs, onMonthClick = onMonthClick)
         }
         item {
             CategoryCapsCard(txs = txs, onCategoryClick = onCategoryClick)
@@ -1218,11 +1743,143 @@ fun StatsDash(txs: List<EchoTransaction>, onCategoryClick: (Category) -> Unit = 
 }
 
 @Composable
+fun SavingsGauge(spent: Double, income: Double) {
+    val rate = EchoStats.savingsRate(spent, income)
+    val anim by animateFloatAsState(
+        targetValue = rate.coerceIn(0, 100) / 100f, label = "gauge"
+    )
+    val color = when {
+        rate >= 20 -> Mint
+        rate >= 0 -> Amber
+        else -> Rose
+    }
+    val track = echoDeep()
+    Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.size(92.dp)) {
+                    drawArc(track, -90f, 360f, useCenter = false, style = Stroke(14f))
+                    if (rate > 0) drawArc(color, -90f, 360f * anim, useCenter = false, style = Stroke(14f))
+                }
+                Text("$rate%", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            }
+            Column(Modifier.weight(1f)) {
+                EchoH("Savings rate")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (income > 0)
+                        "Kept ${"%,.0f".format(income - spent)} of ${"%,.0f".format(income)} in this view."
+                    else "No income in this view yet — savings rate needs income.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    if (rate >= 20) "Excellent — 20%+ is the pro zone."
+                    else if (rate >= 0) "Tip: pay yourself first on income day."
+                    else "Overspent — check category caps below.",
+                    style = MaterialTheme.typography.bodySmall, color = color
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MonthCompareCard(txs: List<EchoTransaction>, onCategoryClick: (Category) -> Unit = {}) {
+    val tap = rememberTap()
+    val thisM = remember(txs) { EchoStats.byCategoryMonth(txs, 0).toMap() }
+    val lastM = remember(txs) { EchoStats.byCategoryMonth(txs, 1).toMap() }
+    val cats = remember(thisM, lastM) {
+        (thisM.keys + lastM.keys).sortedByDescending { thisM[it] ?: 0.0 }.take(6)
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
+        Column(Modifier.padding(16.dp)) {
+            EchoH("This month vs last", Sky)
+            Spacer(Modifier.height(4.dp))
+            if (cats.isEmpty()) Text("Not enough history yet — check back next month.",
+                style = MaterialTheme.typography.bodySmall)
+            cats.forEach { c ->
+                val a = thisM[c] ?: 0.0
+                val b = lastM[c] ?: 0.0
+                val d = if (b > 0) ((a - b) / b * 100).toInt() else if (a > 0) 100 else 0
+                Row(
+                    Modifier.fillMaxWidth().clickable { tap { onCategoryClick(c) } }.padding(vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name.lowercase() + " ›", fontWeight = FontWeight.SemiBold)
+                        Text("last month ${"%,.0f".format(b)}", style = MaterialTheme.typography.bodySmall,
+                            color = echoInk().copy(alpha = 0.6f))
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("%,.0f".format(a), fontWeight = FontWeight.Bold)
+                        Text(
+                            when {
+                                d == 0 -> "— same"
+                                d > 0 -> "▲ $d%"
+                                else -> "▼ ${-d}%"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (d <= 0) Mint else Rose, fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun YearChart(txs: List<EchoTransaction>, onMonthClick: (Long) -> Unit = {}) {
+    val months = remember(txs) { EchoStats.perMonth(EchoStats.visible(txs, true), 12) }
+    val maxM = (months.maxOfOrNull { it.amount } ?: 1.0).coerceAtLeast(1.0)
+    val tap = rememberTap()
+    Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
+        Column(Modifier.padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                EchoH("Last 12 months — tap a month")
+                Text("%,.0f".format(months.sumOf { it.amount }), fontWeight = FontWeight.Bold, color = Amber)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("Tap any bar to open that month in Echoes.", style = MaterialTheme.typography.labelSmall,
+                color = echoInk().copy(alpha = 0.6f))
+            Spacer(Modifier.height(4.dp))
+            Canvas(Modifier.fillMaxWidth().height(110.dp).pointerInput(months) {
+                detectTapGestures { off ->
+                    val n = months.size; if (n == 0) return@detectTapGestures
+                    val bw = size.width / (n * 1.6f)
+                    val i = (off.x / (1.6f * bw)).toInt()
+                    if (i in months.indices) tap { onMonthClick(months[i].monthStart) }
+                }
+            }) {
+                val n = months.size; if (n == 0) return@Canvas
+                val bw = size.width / (n * 1.6f)
+                months.forEachIndexed { i, m ->
+                    val h = (m.amount / maxM * (size.height - 20)).toFloat()
+                    drawRect(
+                        if (i == n - 1) Amber else Mint,
+                        topLeft = androidx.compose.ui.geometry.Offset(i * 1.6f * bw + bw * 0.3f, size.height - h),
+                        size = Size(bw, h)
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(months.firstOrNull()?.label ?: "", style = MaterialTheme.typography.labelSmall)
+                Text(months.lastOrNull()?.label ?: "", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
 fun CategoryCapsCard(txs: List<EchoTransaction>, onCategoryClick: (Category) -> Unit = {}) {
     val ctx = LocalContext.current
     val spentByCat = remember(txs) { EchoStats.byCategory(txs).toMap() }
     var refresh by remember { mutableStateOf(0) }
-    Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
+    Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
         Column(Modifier.padding(16.dp)) {
             Text("Category caps", color = Amber, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
@@ -1247,11 +1904,11 @@ fun CategoryCapsCard(txs: List<EchoTransaction>, onCategoryClick: (Category) -> 
                     ) {
                         Column(Modifier.weight(1f).clickable { onCategoryClick(c) }) {
                             Text(c.name.lowercase() + " ›", fontWeight = FontWeight.SemiBold,
-                                color = if (over) Rose else Ink)
+                                color = if (over) Rose else echoInk())
                             Text("spent ${"%,.0f".format(spent)}" +
                                 if (cap > 0) " / cap ${"%,.0f".format(cap)}" else " / no cap",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (over) Rose else Ink.copy(alpha = 0.7f))
+                                color = if (over) Rose else echoInk().copy(alpha = 0.7f))
                         }
                         OutlinedTextField(
                             value = txt,
@@ -1276,7 +1933,8 @@ fun CategoryCapsCard(txs: List<EchoTransaction>, onCategoryClick: (Category) -> 
 }
 
 @Composable
-fun SourcesScreen(all: List<EchoTransaction>, tab: String, onTab: (String) -> Unit) {
+fun SourcesScreen(all: List<EchoTransaction>, tab: String, onTab: (String) -> Unit,
+                  onUpdateFound: (UpdateChecker.UpdateInfo) -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -1297,10 +1955,9 @@ fun SourcesScreen(all: List<EchoTransaction>, tab: String, onTab: (String) -> Un
             withContext(Dispatchers.Main) {
                 checking = false
                 if (info != null) {
-                    checkMsg = "${info.tag} available — tap Download."
+                    checkMsg = "${info.tag} available — updating in-app."
                     UpdateChecker.notify(ctx, info)
-                    UpdateChecker.openUpdate(ctx, info.url)
-                    UpdateChecker.dismiss(ctx, info.tag)
+                    onUpdateFound(info)
                 } else {
                     checkMsg = "You're on the latest (v$versionName). Checked just now."
                     Toast.makeText(ctx, "No updates — v$versionName is latest", Toast.LENGTH_SHORT).show()
@@ -1321,7 +1978,7 @@ fun SourcesScreen(all: List<EchoTransaction>, tab: String, onTab: (String) -> Un
             }
         }
         Card(
-            colors = CardDefaults.cardColors(containerColor = CardBg),
+            colors = CardDefaults.cardColors(containerColor = echoCard()),
             modifier = Modifier.fillMaxWidth().clickable { onTab("MPESA") }
         ) {
             Column(Modifier.padding(16.dp)) {
@@ -1333,7 +1990,7 @@ fun SourcesScreen(all: List<EchoTransaction>, tab: String, onTab: (String) -> Un
             }
         }
         Card(
-            colors = CardDefaults.cardColors(containerColor = CardBg),
+            colors = CardDefaults.cardColors(containerColor = echoCard()),
             modifier = Modifier.fillMaxWidth().clickable { onTab("BANK") }
         ) {
             Column(Modifier.padding(16.dp)) {
@@ -1353,7 +2010,7 @@ fun SourcesScreen(all: List<EchoTransaction>, tab: String, onTab: (String) -> Un
         Text("M-PESA is your main track. Banks stay separate so totals never mix. Switch the tab to filter Home + Echoes. Tap a card to filter instantly.",
             style = MaterialTheme.typography.bodySmall)
         Card(
-            colors = CardDefaults.cardColors(containerColor = CardBg),
+            colors = CardDefaults.cardColors(containerColor = echoCard()),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1421,7 +2078,7 @@ fun SettingsScreen(onPrefsChanged: () -> Unit = {}, onLockNow: () -> Unit = {}) 
             Text("Fonts, sizes, modes, lock — all here.", style = MaterialTheme.typography.bodySmall)
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(16.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = echoCard()), shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🎨 Appearance", color = Mint, fontWeight = FontWeight.Bold)
                     Text("Mode", style = MaterialTheme.typography.labelMedium)
@@ -1464,7 +2121,7 @@ fun SettingsScreen(onPrefsChanged: () -> Unit = {}, onLockNow: () -> Unit = {}) 
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(16.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = echoCard()), shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🔒 Lock & fingerprint", color = Amber, fontWeight = FontWeight.Bold)
                     Text(
@@ -1536,7 +2193,7 @@ fun SettingsScreen(onPrefsChanged: () -> Unit = {}, onLockNow: () -> Unit = {}) 
         }
         item {
             val learned = remember { LearnStore.count(ctx) }
-            Card(colors = CardDefaults.cardColors(containerColor = CardHi), shape = RoundedCornerShape(16.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = echoCardHi()), shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("💡 My recommendations for your app", color = Mint, fontWeight = FontWeight.Bold)
                     Text("• Backup: Export CSV weekly to Downloads (Home → Export CSV).", style = MaterialTheme.typography.bodySmall)

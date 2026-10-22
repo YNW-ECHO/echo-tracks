@@ -5,6 +5,11 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// CI stamps the build number into versionName so the installed app matches the
+// release tag exactly -> no "update available" nag loop after you update.
+val ciRun: Int = System.getenv("GITHUB_RUN_NUMBER")?.trim()?.toIntOrNull() ?: 0
+val baseVersion = "1.4"
+
 android {
     namespace = "com.echotracks.app"
     compileSdk = 34
@@ -12,8 +17,8 @@ android {
         applicationId = "com.echotracks.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = if (ciRun > 0) 1000 + ciRun else 1000
+        versionName = if (ciRun > 0) "$baseVersion.$ciRun" else baseVersion
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -8,10 +8,15 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 // In-app updater: checks GitHub Releases/latest, compares tag (v1.1) vs
@@ -109,6 +114,91 @@ object UpdateChecker {
         } catch (_: Exception) {}
     }
 
+    // ---------- IN-APP UPDATE (download + install, no browser, no manual APK) ----------
+
+    /** Where the update APK is staged (app-private cache, wiped by the OS when needed). */
+    fun apkFile(ctx: Context): File {
+        val dir = File(ctx.cacheDir, "updates")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "echo-tracks-update.apk")
+    }
+
+    /**
+     * Download the release APK straight into the app. onProgress(0..100).
+     * Returns the staged file, or null if anything went wrong.
+     */
+    suspend fun download(ctx: Context, url: String, onProgress: suspend (Int) -> Unit): File? =
+        withContext(Dispatchers.IO) {
+            try {
+                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 20000
+                    readTimeout = 60000
+                    setRequestProperty("User-Agent", "EchoTracks-App")
+                    instanceFollowRedirects = true
+                }
+                if (conn.responseCode !in 200..299) {
+                    conn.disconnect()
+                    return@withContext null
+                }
+                val total = conn.contentLengthLong
+                val out = apkFile(ctx)
+                conn.inputStream.use { input ->
+                    out.outputStream().use { o ->
+                        val buf = ByteArray(64 * 1024)
+                        var read = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            o.write(buf, 0, n)
+                            read += n
+                            if (total > 0) {
+                                onProgress(((read * 100) / total).toInt().coerceIn(0, 99))
+                            }
+                        }
+                    }
+                }
+                conn.disconnect()
+                // a real APK is way bigger than 100 KB — guards against HTML error pages
+                if (out.length() < 100_000L) {
+                    out.delete()
+                    return@withContext null
+                }
+                onProgress(100)
+                out
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+    /**
+     * Hand the staged APK to the Android installer.
+     * Returns true if the installer opened, false if the user still has to allow
+     * "install unknown apps" (we open that settings screen for them).
+     */
+    fun install(ctx: Context, file: File): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                !ctx.packageManager.canRequestPackageInstalls()
+            ) {
+                val s = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${ctx.packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(s)
+                return false
+            }
+            val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", file)
+            val i = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(i)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun notify(ctx: Context, info: UpdateInfo) {
         try {
             val chId = "echo_updates"
@@ -129,8 +219,9 @@ object UpdateChecker {
             }
             val pi = PendingIntent.getActivity(
                 ctx, 7,
-                Intent(Intent.ACTION_VIEW, Uri.parse(info.url)).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent(ctx, com.echotracks.app.MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("open_update", true)
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )

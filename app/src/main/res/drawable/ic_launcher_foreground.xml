@@ -1,28 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Echo Tracks foreground: mint echo waves + amber pulse on midnight. -->
+<!-- Echo Tracks foreground: mint echo waves + amber pulse, layered for depth. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-<!-- midnight base comes from ic_launcher_background — keep foreground transparent
-     so the launcher can mask circle/squircle correctly. -->
     <!-- outer echo ring -->
     <path android:fillColor="#00000000" android:strokeColor="#00E5A0"
-        android:strokeWidth="5" android:strokeLineCap="round"
-        android:pathData="M54,14a40,40 0 1,1 -0.1,0" />
-    <!-- middle echo arc (gap = sound wave) -->
+        android:strokeWidth="4.5" android:strokeLineCap="round" android:strokeAlpha="0.55"
+        android:pathData="M54,17a37,37 0 1,1 -0.1,0" />
+    <!-- middle echo arcs (gap = sound wave) -->
     <path android:fillColor="#00000000" android:strokeColor="#5BD8C8"
-        android:strokeWidth="6" android:strokeLineCap="round"
-        android:pathData="M22,68a40,40 0 0,1 10,-34" />
+        android:strokeWidth="5.5" android:strokeLineCap="round" android:strokeAlpha="0.85"
+        android:pathData="M25,67a37,37 0 0,1 9,-31" />
     <path android:fillColor="#00000000" android:strokeColor="#5BD8C8"
-        android:strokeWidth="6" android:strokeLineCap="round"
-        android:pathData="M86,68a40,40 0 0,0 -10,-34" />
+        android:strokeWidth="5.5" android:strokeLineCap="round" android:strokeAlpha="0.85"
+        android:pathData="M83,67a37,37 0 0,0 -9,-31" />
     <!-- core mint coin -->
     <path android:fillColor="#00E5A0"
-        android:pathData="M54,34a20,20 0 1,1 -0.1,0z" />
+        android:pathData="M54,36a19,19 0 1,1 -0.1,0z" />
+    <!-- inner shadow ring for depth -->
+    <path android:fillColor="#00000000" android:strokeColor="#00B87E"
+        android:strokeWidth="2" android:strokeAlpha="0.55"
+        android:pathData="M54,36a19,19 0 1,1 -0.1,0z" />
     <!-- E cut -->
     <path android:fillColor="#0E1A2B"
-        android:pathData="M48,46h12v4h-12zM48,52h10v4h-10zM48,58h12v4h-12zM46,46h4v16h-4z" />
+        android:pathData="M49,45h11v3.6h-11zM49,51h9v3.6h-9zM49,57h11v3.6h-11zM47,45h3.4v15.6h-3.4z" />
     <!-- amber pulse dot -->
     <path android:fillColor="#FFB020"
-        android:pathData="M78,78a7,7 0 1,1 -0.1,0z" />
+        android:pathData="M77,77a6.5,6.5 0 1,1 -0.1,0z" />
 </vector>

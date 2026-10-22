@@ -25,13 +25,20 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -671,7 +678,7 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
 
     Scaffold(
         bottomBar = {
-            NavigationBar(containerColor = echoCard()) {
+            NavigationBar(containerColor = echoCard(), tonalElevation = 12.dp) {
                 val tabs = listOf(
                     "Home" to Icons.Filled.Home,
                     "Echoes" to Icons.AutoMirrored.Filled.ReceiptLong,
@@ -680,16 +687,25 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                     "Menu" to Icons.Filled.Menu
                 )
                 tabs.forEach { (s, icon) ->
+                    val selected = currentRoute == s
                     NavigationBarItem(
-                        selected = currentRoute == s,
+                        selected = selected,
                         onClick = { nav.navigate(s) { launchSingleTop = true } },
-                        label = { Text(s) },
+                        label = { Text(s, style = MaterialTheme.typography.labelSmall) },
                         icon = {
                             Icon(
                                 imageVector = icon, contentDescription = s,
-                                tint = if (currentRoute == s) Mint else echoInk().copy(alpha = 0.7f)
+                                tint = if (selected) Mint else echoInk().copy(alpha = 0.6f),
+                                modifier = Modifier.size(24.dp)
                             )
-                        }
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Mint,
+                            selectedTextColor = Mint,
+                            unselectedIconColor = echoInk().copy(alpha = 0.6f),
+                            unselectedTextColor = echoInk().copy(alpha = 0.6f),
+                            indicatorColor = Mint.copy(alpha = 0.16f)
+                        )
                     )
                 }
             }
@@ -898,8 +914,10 @@ fun LockGate(pinInput: String, onInput: (String) -> Unit, onUnlock: () -> Unit,
 @Composable
 fun StatPill(label: String, value: Double, color: Color, modifier: Modifier = Modifier) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = echoDeep().copy(alpha = 0.65f)),
-        shape = RoundedCornerShape(14.dp), modifier = modifier
+        colors = CardDefaults.cardColors(containerColor = echoDeep().copy(alpha = 0.75f)),
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        modifier = modifier.shadow(4.dp, RoundedCornerShape(18.dp))
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = echoInk().copy(alpha = 0.7f))
@@ -927,7 +945,7 @@ fun SectionHeader(title: String, accent: Color = Mint, onSeeAll: (() -> Unit)? =
             style = MaterialTheme.typography.titleMedium, fontStyle = FontStyle.Italic,
             fontFamily = FontFamily.Serif
         )
-        if (onSeeAll != null) TextButton(onClick = onSeeAll) { Text("See all", color = accent) }
+        if (onSeeAll != null) TextButton(onClick = onSeeAll, shape = RoundedCornerShape(12.dp)) { Text("See all", color = accent) }
     }
 }
 
@@ -939,7 +957,9 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {},
              onDetails: (String, String) -> Unit = { _, _ -> }) {
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    var goalTxt by remember { mutableStateOf(BudgetStore.get(ctx).toInt().toString()) }
+    // rememberSaveable keeps a typed amount when the card scrolls out of the
+    // LazyColumn (plain remember would reset it back to the stored goal).
+    var goalTxt by rememberSaveable { mutableStateOf(BudgetStore.get(ctx).toInt().toString()) }
     var savedFlash by remember { mutableStateOf(false) }
     val goal = goalTxt.toDoubleOrNull()?.coerceAtLeast(1.0) ?: 1.0
     val pct = (monthSpend / goal).coerceIn(0.0, 1.0)
@@ -951,19 +971,25 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {},
     }
     Card(
         colors = CardDefaults.cardColors(containerColor = echoCard()),
-        shape = RoundedCornerShape(18.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        modifier = Modifier.fillMaxWidth()
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp), ambientColor = Mint.copy(alpha = 0.12f), spotColor = Mint.copy(alpha = 0.08f))
     ) {
         Column(
             Modifier.background(goalBrush()).padding(18.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "🎯 Monthly budget goal", color = Mint, fontWeight = FontWeight.Bold,
-                    fontStyle = FontStyle.Italic, fontFamily = FontFamily.Serif,
-                    style = MaterialTheme.typography.titleMedium
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.Savings, contentDescription = null, tint = Mint, modifier = Modifier.size(22.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Filled.Insights, contentDescription = null, tint = Mint, modifier = Modifier.size(20.dp))
+                    Text(
+                        "Monthly spend vs last month", color = Mint, fontWeight = FontWeight.Bold,
+                        fontStyle = FontStyle.Italic, fontFamily = FontFamily.Serif,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
                 TextButton(onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     val left = goal - monthSpend
@@ -991,11 +1017,11 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {},
             LinearProgressIndicator(
                 progress = { animPct },
                 color = barColor, trackColor = echoDeep(),
-                modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(8.dp))
-                    .clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        Toast.makeText(ctx, "${(pct * 100).toInt()}% of goal used", Toast.LENGTH_SHORT).show()
-                    }
+        modifier = Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(10.dp))
+            .clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                Toast.makeText(ctx, "${(pct * 100).toInt()}% of goal used", Toast.LENGTH_SHORT).show()
+            }
             )
             Spacer(Modifier.height(6.dp))
             Text(
@@ -1026,29 +1052,38 @@ fun GoalCard(monthSpend: Double, onSaved: (Double) -> Unit = {},
             }
             Spacer(Modifier.height(8.dp))
             // Always-visible input + Save: type any amount, tap Save, done.
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // imePadding lifts the field + Save above the soft keyboard so the
+            // button is always reachable right after typing an amount.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.imePadding()
+            ) {
                 OutlinedTextField(
                     value = goalTxt,
                     onValueChange = { goalTxt = it.filter { c -> c.isDigit() }.take(9) },
                     label = { Text("Goal (Ksh)") }, modifier = Modifier.weight(1f), singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = RoundedCornerShape(14.dp)
                 )
-                Button(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        val g = goalTxt.toDoubleOrNull()
-                        if (g == null || g < 1000) {
-                            Toast.makeText(ctx, "Type an amount first (min 1,000)", Toast.LENGTH_SHORT).show()
-                        } else {
-                            BudgetStore.set(ctx, g)
-                            savedFlash = true
-                            onSaved(g)
-                            OverspendAlerter.check(ctx, monthSpend, g)
-                            Toast.makeText(ctx, "Budget goal saved: ${"%,.0f".format(g)}", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight)
-                ) { Text("Save") }
+            Button(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val g = goalTxt.toDoubleOrNull()
+                    if (g == null || g < 1000) {
+                        Toast.makeText(ctx, "Type an amount first (min 1,000)", Toast.LENGTH_SHORT).show()
+                    } else {
+                        BudgetStore.set(ctx, g)
+                        savedFlash = true
+                        onSaved(g)
+                        OverspendAlerter.check(ctx, monthSpend, g)
+                        Toast.makeText(ctx, "Budget goal saved: ${"%,.0f".format(g)}", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight),
+                shape = RoundedCornerShape(14.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+            ) { Text("Save") }
             }
         }
     }
@@ -1139,7 +1174,9 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                     OutlinedTextField(
                         value = query, onValueChange = onQuery,
                         label = { Text("Search name, amount, category… e.g. naivas, >5000, 1k-5k") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Mint.copy(alpha = 0.8f)) },
+                        shape = RoundedCornerShape(16.dp)
                     )
                     SearchSuggestRow(onPick = onQuery, recents = recents, onClearRecents = onClearRecents)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1161,11 +1198,11 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
             }
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = echoCard()),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+                        colors = CardDefaults.cardColors(containerColor = echoCard()),
+                        shape = RoundedCornerShape(18.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                        modifier = Modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(18.dp), ambientColor = Mint.copy(alpha = 0.08f))
+                    ) {
                 Column(
                     Modifier.background(heroBrush()).padding(20.dp)
                 ) {
@@ -1180,8 +1217,8 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                             Text(greetSub, style = MaterialTheme.typography.bodySmall, color = echoInk().copy(alpha = 0.8f))
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            TextButton(onClick = onExport) { Text("CSV", color = Mint) }
-                            TextButton(onClick = onWeeklyPdf) { Text("Week PDF", color = Amber) }
+                            TextButton(onClick = onExport, shape = RoundedCornerShape(12.dp)) { Text("CSV", color = Mint) }
+                            TextButton(onClick = onWeeklyPdf, shape = RoundedCornerShape(12.dp)) { Text("Week PDF", color = Amber) }
                             TextButton(onClick = onMonthlyPdf) { Text("Month PDF", color = Sky) }
                         }
                     }
@@ -1228,7 +1265,7 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            if (activeFilters > 0) "🎛 Filters • $activeFilters on" else "🎛 Filters",
+                            if (activeFilters > 0) "Filters • $activeFilters on" else "Filters",
                             color = Mint, fontWeight = FontWeight.Bold
                         )
                         Text(if (showFilters) "▾" else "▸", color = Mint, fontWeight = FontWeight.Bold)
@@ -1239,13 +1276,13 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf("TODAY", "7D", "ALL", "1M", "3M", "6M").forEach { k ->
-                            FilterChip(selected = rangeKey == k, onClick = { tap { onRange(k) } }, label = { Text(k) })
+                            FilterChip(selected = rangeKey == k, onClick = { tap { onRange(k) } }, label = { Text(k) }, shape = RoundedCornerShape(12.dp))
                         }
                     }
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("ALL", "MPESA", "BANK").forEach { k ->
-                            FilterChip(selected = sourceTab == k, onClick = { tap { onSource(k) } }, label = { Text(k) })
+                            FilterChip(selected = sourceTab == k, onClick = { tap { onSource(k) } }, label = { Text(k) }, shape = RoundedCornerShape(12.dp))
                         }
                     }
                     if (years.size > 1) {
@@ -1266,7 +1303,8 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                                 FilterChip(
                                     selected = yearKey == y.toString(),
                                     onClick = { tap { onYear(y.toString()) } },
-                                    label = { Text(y.toString()) }
+                                    label = { Text(y.toString()) },
+                                    shape = RoundedCornerShape(12.dp)
                                 )
                             }
                         }
@@ -1282,9 +1320,9 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                     if (loading) { Spacer(Modifier.height(6.dp)); LinearProgressIndicator(color = Mint); Text("Reading SMS…", style = MaterialTheme.typography.bodySmall) }
                     if (!granted) {
                         Spacer(Modifier.height(6.dp))
-                        Button(onClick = onGrant, colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight)) { Text("Allow SMS reading") }
+                        Button(onClick = onGrant, colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Midnight), shape = RoundedCornerShape(14.dp)) { Text("Allow SMS reading") }
                     } else {
-                        TextButton(onClick = onRescan) { Text("↻ Rescan inbox", color = Mint) }
+                        TextButton(onClick = onRescan, shape = RoundedCornerShape(12.dp)) { Text("↻ Rescan inbox", color = Mint) }
                     }
                 }
             }
@@ -1305,8 +1343,11 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        EchoH("Bill reminders", Amber)
-                        if (bills.isNotEmpty()) TextButton(onClick = onGoEchoes) { Text("View all", color = Amber) }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Filled.NotificationsActive, contentDescription = null, tint = Amber, modifier = Modifier.size(18.dp))
+                            EchoH("Bill reminders", Amber)
+                        }
+                        if (bills.isNotEmpty()) TextButton(onClick = onGoEchoes, shape = RoundedCornerShape(12.dp)) { Text("View all", color = Amber) }
                     }
                     Spacer(Modifier.height(6.dp))
                     if (bills.isEmpty()) Text("No repeating bills detected yet. Pay KPLC / DSTV / rent twice and I'll track them.",
@@ -1455,7 +1496,10 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
             Card(colors = CardDefaults.cardColors(containerColor = echoCard())) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        EchoH("Where it went")
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Filled.PieChart, contentDescription = null, tint = Mint, modifier = Modifier.size(18.dp))
+                            EchoH("Where it went")
+                        }
                         TextButton(onClick = onGoStats) { Text("All", color = Mint) }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -1478,7 +1522,7 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         EchoH("Top destinations")
-                        TextButton(onClick = onGoEchoes) { Text("See all", color = Mint) }
+                        TextButton(onClick = onGoEchoes, shape = RoundedCornerShape(12.dp)) { Text("See all", color = Mint) }
                     }
                     Spacer(Modifier.height(6.dp))
                     if (top.isEmpty()) Text("Nothing yet.")
@@ -1499,10 +1543,11 @@ fun DashboardHome(spent: Double, income: Double, net: Double, txs: List<EchoTran
         }
         items(txs.take(30)) { t ->
             Card(
-                colors = CardDefaults.cardColors(containerColor = echoCard()),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth().clickable { onTxClick(t) }
-            ) {
+        colors = CardDefaults.cardColors(containerColor = echoCard()),
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        modifier = Modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(18.dp), ambientColor = Mint.copy(alpha = 0.08f))
+    ) {
                 Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1555,7 +1600,13 @@ fun EchoesGrouped(
                     Modifier.background(MaterialTheme.colorScheme.background).padding(bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(value = query, onValueChange = onQuery, label = { Text("Search name, amount, category… e.g. >5000") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(
+                        value = query, onValueChange = onQuery,
+                        label = { Text("Search name, amount, category… e.g. >5000") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Mint.copy(alpha = 0.8f)) },
+                        shape = RoundedCornerShape(16.dp)
+                    )
                     SearchSuggestRow(onPick = onQuery, recents = recents, onClearRecents = onClearRecents)
                     if (dayKey != null) {
                         AssistChip(onClick = onClearDay, label = {
@@ -2025,7 +2076,9 @@ fun SourcesScreen(all: List<EchoTransaction>, tab: String, onTab: (String) -> Un
             style = MaterialTheme.typography.bodySmall)
         Card(
             colors = CardDefaults.cardColors(containerColor = echoCard()),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

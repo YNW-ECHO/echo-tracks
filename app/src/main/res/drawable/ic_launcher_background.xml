@@ -1,5 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Solid midnight backing for the adaptive icon. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#0E1A2B" />
-</shape>
+<!-- Adaptive icon background: deep midnight with a mint glow from the top-left. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0" android:startY="0"
+                android:endX="108" android:endY="108">
+                <item android:offset="0" android:color="#FF0B2A22" />
+                <item android:offset="0.55" android:color="#FF0E1A2B" />
+                <item android:offset="1" android:color="#FF0A1220" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- soft mint halo behind the echo rings -->
+    <path android:pathData="M54,54m-34,0a34,34 0 1,1 68,0a34,34 0 1,1 -68,0">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54" android:centerY="54" android:gradientRadius="34">
+                <item android:offset="0" android:color="#3300E5A0" />
+                <item android:offset="1" android:color="#0000E5A0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

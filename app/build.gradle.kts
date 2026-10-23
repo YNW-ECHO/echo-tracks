@@ -29,8 +29,21 @@ android {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
+    // Fixed signing key: every CI build must carry the SAME signature, otherwise Android
+    // rejects in-app updates with "App not installed" (CI runners generate a new random
+    // debug key on every run).
+    signingConfigs {
+        create("echo") {
+            storeFile = file("../keystore/echo-tracks.p12")
+            storeType = "pkcs12"
+            storePassword = "echotracks"
+            keyAlias = "echotracks"
+            keyPassword = "echotracks"
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("echo")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -38,6 +51,7 @@ android {
             )
         }
         debug {
+            signingConfig = signingConfigs.getByName("echo")
             applicationIdSuffix = null
         }
     }

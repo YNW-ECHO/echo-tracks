@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -42,6 +43,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -155,10 +157,28 @@ else Brush.horizontalGradient(listOf(Color(0xFFE9F0EB), Color(0xFFD6EBDD)))
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Save any crash's stack trace so the next launch can show it (no adb needed).
+        val crashFile = java.io.File(filesDir, "last_crash.txt")
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try { crashFile.writeText(android.util.Log.getStackTraceString(e)) } catch (_: Exception) {}
+            prev?.uncaughtException(t, e)
+        }
         // Screenshots ALLOWED (no FLAG_SECURE): user wants to share/save
         // dashboard shots. PIN + data still protected by app lock.
+        val crash = try { if (crashFile.exists()) crashFile.readText() else null } catch (_: Exception) { null }
         setContent {
-            ThemedEchoApp()
+            var shown by remember { mutableStateOf(crash) }
+            if (shown != null) {
+                Column(Modifier.fillMaxSize().background(Color.Black).padding(16.dp)) {
+                    Text("Echo Tracks crashed last time. Screenshot this and send it:", color = Color.White)
+                    Text(
+                        shown!!.take(3500), color = Color(0xFFFFB4AB), fontSize = 11.sp,
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())
+                    )
+                    Button(onClick = { crashFile.delete(); shown = null }) { Text("Continue to app") }
+                }
+            } else ThemedEchoApp()
         }
     }
 }

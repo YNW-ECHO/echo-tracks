@@ -282,7 +282,8 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                 val tx = loadAndCache()
                 withContext(Dispatchers.Main) {
                     txs = tx; loading = false
-                    Toast.makeText(ctx, "${tx.size} echoes refreshed", Toast.LENGTH_SHORT).show()
+                    val err = SmsReader.lastError
+                    Toast.makeText(ctx, if (tx.isEmpty() && err != null) err else "${tx.size} echoes refreshed", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -328,8 +329,32 @@ fun EchoApp(onPrefsChanged: () -> Unit = {}) {
                 }
             }
         } else {
-            Toast.makeText(ctx, "SMS permission needed for auto-tracking", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, "SMS permission needed — enable it in Settings > Permissions", Toast.LENGTH_LONG).show()
+            // Denied for good (or blocked as a sideloaded app): the system dialog won't show again.
+            val act = generateSequence(ctx) { (it as? android.content.ContextWrapper)?.baseContext }
+                .filterIsInstance<android.app.Activity>().firstOrNull()
+            val permanent = act == null ||
+                !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(act, Manifest.permission.READ_SMS)
+            if (permanent) {
+                try {
+                    ctx.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            android.net.Uri.parse("package:${ctx.packageName}")
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (_: Exception) {}
+            }
         }
+    }
+    // Permission granted from system Settings while app was in background: pick it up on return.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) granted = hasSms(ctx)
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
     LaunchedEffect(granted) {
         if (granted && txs.isEmpty() && !loading) {

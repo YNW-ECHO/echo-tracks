@@ -9,17 +9,34 @@ import com.echotracks.app.rules.CategoryRules
 object SmsReader {
     data class RawSms(val sender: String, val body: String, val date: Long)
 
+    /** Last read problem (e.g. permission revoked) so the UI can explain an empty result. */
+    @Volatile var lastError: String? = null
+
     fun readAll(ctx: Context, limit: Int = 10000): List<RawSms> {
+        lastError = null
+        // Some OEM builds expose nothing under /inbox; fall back to the whole table (type=1 = received).
+        val attempts = listOf(
+            Triple("content://sms/inbox", null as String?, null as Array<String>?),
+            Triple("content://sms", "type = ?", arrayOf("1"))
+        )
+        for ((uriStr, sel, args) in attempts) {
+            val out = query(ctx, uriStr, sel, args, limit)
+            if (out.isNotEmpty()) return out
+            if (lastError != null) break // permission problem: fallback won't help
+        }
+        return emptyList()
+    }
+
+    private fun query(ctx: Context, uriStr: String, sel: String?, args: Array<String>?, limit: Int): List<RawSms> {
         val out = mutableListOf<RawSms>()
         try {
-            val uri = Uri.parse("content://sms/inbox")
             val cols = arrayOf("address", "body", "date")
-            ctx.contentResolver.query(uri, cols, null, null, "date DESC")?.use { c ->
+            ctx.contentResolver.query(Uri.parse(uriStr), cols, sel, args, "date DESC")?.use { c ->
                 val ai = c.getColumnIndexOrThrow("address")
                 val bi = c.getColumnIndexOrThrow("body")
                 val di = c.getColumnIndexOrThrow("date")
                 var n = 0
-                while (c.moveToNext() && n < limit) {
+                while (n < limit && c.moveToNext()) {
                     try {
                         val body = c.getString(bi) ?: ""
                         if (body.isBlank()) continue
@@ -28,7 +45,11 @@ object SmsReader {
                     } catch (_: Exception) { continue }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: SecurityException) {
+            lastError = "SMS permission denied"
+        } catch (e: Exception) {
+            lastError = e.message ?: "SMS read failed"
+        }
         return out
     }
 
@@ -50,7 +71,7 @@ object SmsReader {
     // public for tests
     fun parseBody(body: String, date: Long, src: String): EchoTransaction? {
         if (body.isBlank()) return null
-        val amtRx = Regex("""(?:Ksh|KES)\s?([\d,]+(?:\.\d{2})?)""", RegexOption.IGNORE_CASE)
+        val amtRx = Regex("""(?:Ksh|KES)\.?\s*([\d,]*\d(?:\.\d{1,2})?)""", RegexOption.IGNORE_CASE)
         val first = amtRx.find(body) ?: return null
         val amt = first.groupValues[1].replace(",", "").toDoubleOrNull() ?: return null
         if (amt <= 0 || amt > 50_000_000) return null

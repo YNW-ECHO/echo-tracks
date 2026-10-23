@@ -61,7 +61,7 @@ def extract_who(body):
 
 def parse(body):
     # FIX: allow amounts without decimals (Ksh450) — old regex only matched 450.00
-    m = re.search(r"(?:Ksh|KES)\s?([\d,]+(?:\.\d{2})?)", body, re.I)
+    m = re.search(r"(?:Ksh|KES)\.?\s*([\d,]*\d(?:\.\d{1,2})?)", body, re.I)
     if not m: return None
     amt = float(m.group(1).replace(",", ""))
     low = body.lower()

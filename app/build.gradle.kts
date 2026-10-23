@@ -76,6 +76,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // security + strength (stable versions - alphas break CI resolution)
     implementation("androidx.biometric:biometric:1.1.0")
+    // biometric drags in an old fragment whose 16-bit request-code check crashes activity 1.9 permission launchers
+    implementation("androidx.fragment:fragment:1.8.3")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     // background daily rescan
     implementation("androidx.work:work-runtime-ktx:2.9.0")
